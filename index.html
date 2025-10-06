@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auditoría Pública de Dominio (DNS + RDAP)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>🔍 Auditoría Pública de Dominio</h1>
+    <p class="subtitle">DNS, RDAP y parámetros públicos — listo para GitHub Pages</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <label for="domain">Dominio</label>
+      <div class="row">
+        <input id="domain" type="text" placeholder="ej: example.com" />
+        <button id="scanBtn">Escanear</button>
+      </div>
+      <p class="hint">Este escáner usa solo fuentes públicas (DNS sobre HTTPS y RDAP) y no realiza acciones intrusivas.</p>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Resumen</h2>
+        <ul id="summary"></ul>
+      </div>
+
+      <div class="card">
+        <h2>DNS (DoH)</h2>
+        <div id="dnsResults" class="results"></div>
+      </div>
+
+      <div class="card">
+        <h2>RDAP / WHOIS</h2>
+        <div id="rdapResults" class="results"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Log</h2>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+
+  <footer>
+    <p>Hecho con ♥ — solo parámetros públicos | Fuente: <a href="https://dns.google/" target="_blank" rel="noreferrer">dns.google</a> y <a href="https://rdap.org" target="_blank" rel="noreferrer">rdap.org</a></p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

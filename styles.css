@@ -1,0 +1,70 @@
+
+:root {
+  --bg: #0b1020;
+  --card: #11162b;
+  --text: #e8eef7;
+  --muted: #a8b3c7;
+  --ok: #4ade80;
+  --warn: #f59e0b;
+  --err: #ef4444;
+  --accent: #3b82f6;
+  --border: #1f2a44;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  color: var(--text);
+  background: radial-gradient(1200px 800px at 20% 0%, #121938 0%, var(--bg) 55%);
+}
+
+header {
+  padding: 32px 20px 10px;
+  text-align: center;
+}
+h1 { margin: 0 0 6px; font-size: 28px; }
+.subtitle { color: var(--muted); margin-top: 4px; }
+
+main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 16px;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  margin-bottom: 16px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-gap: 16px;
+}
+
+.row { display: flex; gap: 8px; }
+input {
+  flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: #0e1530; color: var(--text);
+}
+button {
+  padding: 10px 14px; background: var(--accent); color: white; border: none;
+  border-radius: 10px; cursor: pointer; font-weight: 600;
+}
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+
+.results code, .log { background: #0b122b; border: 1px solid var(--border); padding: 10px; border-radius: 10px; display: block; }
+.log { max-height: 320px; overflow: auto; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+.badge.ok { background: rgba(74, 222, 128, .15); color: var(--ok); border: 1px solid rgba(74, 222, 128, .35); }
+.badge.warn { background: rgba(245, 158, 11, .15); color: var(--warn); border: 1px solid rgba(245, 158, 11, .35); }
+.badge.err { background: rgba(239, 68, 68, .15); color: var(--err); border: 1px solid rgba(239, 68, 68, .35); }
+.badge.info { background: rgba(59, 130, 246, .15); color: var(--accent); border: 1px solid rgba(59, 130, 246, .35); }
+
+ul { padding-left: 18px; }
+footer { text-align: center; color: var(--muted); padding: 24px 0 42px; font-size: 13px; }
