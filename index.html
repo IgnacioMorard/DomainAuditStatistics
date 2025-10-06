@@ -10,7 +10,7 @@
 <body>
   <header>
     <h1>🔍 Auditoría Pública de Dominio</h1>
-    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.7 (Observatory v2)</p>
+    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.8</p>
   </header>
 
   <main>
@@ -19,13 +19,17 @@
       <div class="row">
         <input id="domain" type="text" placeholder="ej: example.com" inputmode="url" autocomplete="off" />
       </div>
-      <div class="row wrap">
-        <button id="scanBtn">Escanear</button>
-        <button id="dnsBtn" class="ghost">DNS: Auto (race)</button>
-        <label class="switch">
-          <input type="checkbox" id="fastMode" />
-          <span>Modo rápido</span>
-        </label>
+      <div class="row wrap split">
+        <div class="btn-group">
+          <button id="scanBtn">Escanear</button>
+          <button id="dnsBtn" class="ghost">DNS: Auto (race)</button>
+        </div>
+        <div class="options">
+          <label class="switch">
+            <input type="checkbox" id="fastMode" />
+            <span>Modo rápido</span>
+          </label>
+        </div>
       </div>
       <p class="hint">Solo fuentes públicas (DoH, RDAP y APIs públicas). No intrusivo. En móvil, activá “Modo rápido”.</p>
     </section>

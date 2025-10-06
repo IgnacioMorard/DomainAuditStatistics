@@ -12,7 +12,7 @@ const dnsBtn = $("#dnsBtn");
 const input = $("#domain");
 const fastModeEl = $("#fastMode");
 
-let dnsMode = "auto"; // auto (race), google, cloudflare
+let dnsMode = "auto"; // auto (race), google, cloudflare, quad9, dnssb
 
 // Heurística de móvil: ajustar timeouts si red es lenta
 let DEFAULT_TIMEOUT = 9000;
@@ -59,47 +59,52 @@ function fetchWithTimeout(url, opts={}, ms=DEFAULT_TIMEOUT) {
 }
 
 // ===== DoH providers =====
-function dohGoogle(name, type="A") {
-  return fetchWithTimeout(
-    `https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`,
-    { headers:{ "accept":"application/dns-json" }, mode:"cors", cache:"no-store" }
-  ).then(r=>{
-    if(!r.ok) throw new Error(`dns.google ${type} -> HTTP ${r.status}`);
-    return r.json();
-  });
-}
-function dohCloudflare(name, type="A") {
-  return fetchWithTimeout(
-    `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}&ct=application/dns-json`,
-    { headers:{ "accept":"application/dns-json" }, mode:"cors", cache:"no-store" }
-  ).then(r=>{
-    if(!r.ok) throw new Error(`cloudflare-dns ${type} -> HTTP ${r.status}`);
-    return r.json();
-  });
-}
+const dohProviders = {
+  google: (name, type="A") =>
+    fetchWithTimeout(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`,
+      { headers:{ "accept":"application/dns-json" }, mode:"cors", cache:"no-store" })
+      .then(r=>{ if(!r.ok) throw new Error(`dns.google ${type} -> HTTP ${r.status}`); return r.json(); }),
 
-// **RACE**: correr ambos proveedores en paralelo y tomar el primero
-function dohRace(name, type="A") {
-  const p1 = dohGoogle(name, type);
-  const p2 = dohCloudflare(name, type);
-  return Promise.race([
-    p1.then(v=>({ok:true,v})).catch(e=>({ok:false,e})),
-    p2.then(v=>({ok:true,v})).catch(e=>({ok:false,e}))
-  ]).then(first => {
-    if (first.ok) return first.v;
-    return dohGoogle(name, type).catch(()=>dohCloudflare(name, type));
+  cloudflare: (name, type="A") =>
+    fetchWithTimeout(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}&ct=application/dns-json`,
+      { headers:{ "accept":"application/dns-json" }, mode:"cors", cache:"no-store" })
+      .then(r=>{ if(!r.ok) throw new Error(`cloudflare-dns ${type} -> HTTP ${r.status}`); return r.json(); }),
+
+  quad9: (name, type="A") =>
+    fetchWithTimeout(`https://dns.quad9.net/dns-query?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}&ct=application/dns-json`,
+      { headers:{ "accept":"application/dns-json" }, mode:"cors", cache:"no-store" })
+      .then(r=>{ if(!r.ok) throw new Error(`quad9 ${type} -> HTTP ${r.status}`); return r.json(); }),
+
+  dnssb: (name, type="A") =>
+    fetchWithTimeout(`https://doh.dns.sb/dns-query?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}&ct=application/dns-json`,
+      { headers:{ "accept":"application/dns-json" }, mode:"cors", cache:"no-store" })
+      .then(r=>{ if(!r.ok) throw new Error(`dns.sb ${type} -> HTTP ${r.status}`); return r.json(); }),
+};
+
+function dohRace(name, type="A", providers=["google","cloudflare","quad9","dnssb"]) {
+  const racers = providers.map(p =>
+    dohProviders[p](name, type).then(v=>({ok:true,v, p})).catch(e=>({ok:false,e, p}))
+  );
+  return Promise.race(racers).then(first => {
+    if (first.ok) { log("INFO", `DoH respondió primero: ${first.p}`); return first.v; }
+    // si la primera en resolver fue una falla (raro), probar secuencial
+    for (const p of providers) {
+      return dohProviders[p](name, type).catch(()=>{});
+    }
   });
 }
 
 async function doh(name, type="A") {
   try {
-    if (dnsMode === "google") return await dohGoogle(name, type);
-    if (dnsMode === "cloudflare") return await dohCloudflare(name, type);
+    if (dnsMode in dohProviders) return await dohProviders[dnsMode](name, type);
     return await dohRace(name, type);
   } catch (e) {
-    log("INFO", `DoH fallo (${type}): ${e.message}`);
-    try { return await dohCloudflare(name, type); }
-    catch (e2) { log("WARN", `DoH fallback también falló: ${e2.message}`); throw e; }
+    // fallback secuencial completo
+    for (const p of ["google","cloudflare","quad9","dnssb"]) {
+      try { return await dohProviders[p](name, type); } catch(_){}
+    }
+    log("WARN", `DoH total fail (${type}): ${e.message}`);
+    throw e;
   }
 }
 
@@ -113,18 +118,26 @@ function fetchJson(url) { return fetchWithTimeout(url, {mode:"cors", cache:"no-s
 const rdapDomain = (d) => fetchJson(`https://rdap.org/domain/${encodeURIComponent(d)}`);
 const hstsPreload = (d) => fetchJson(`https://hstspreload.org/api/v2/status?domain=${encodeURIComponent(d)}`);
 
-// Observatory v2 (MDN): POST /api/v2/scan?host=domain
+// Observatory v2 (MDN) con robustez: POST preferente; si falla por CORS/5xx, intento GET
 async function observatoryV2(domain) {
   const url = `https://observatory-api.mdn.mozilla.net/api/v2/scan?host=${encodeURIComponent(domain)}`;
-  const r = await fetchWithTimeout(url, {
-    method: "POST",
-    mode: "cors",
-    cache: "no-store",
-    headers: { "accept": "application/json" }
-  }, DEFAULT_TIMEOUT);
-  if (!r.ok) throw new Error(`Observatory v2 HTTP ${r.status}`);
-  const j = await r.json();
-  return j; // { id, details_url, algorithm_version, scanned_at, grade, score, tests_* }
+  // intento POST
+  try {
+    const r = await fetchWithTimeout(url, { method: "POST", mode: "cors", cache: "no-store", headers: { "accept": "application/json" } });
+    if (!r.ok) throw new Error(`Observatory v2 HTTP ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    log("INFO", `Observatory POST falló (${e.message}). Intento GET (cache)…`);
+    // intento GET (algunos CDNs permiten GET cache)
+    try {
+      const r2 = await fetchWithTimeout(url, { method: "GET", mode: "cors", cache: "no-store", headers: { "accept": "application/json" } });
+      if (!r2.ok) throw new Error(`Observatory v2 GET HTTP ${r2.status}`);
+      return await r2.json();
+    } catch (e2) {
+      log("WARN", `Observatory GET falló (${e2.message}). Mostrando enlace al reporte.`);
+      return null;
+    }
+  }
 }
 
 // MTA-STS / TLS-RPT / security.txt
@@ -162,19 +175,30 @@ async function checkSecurityTxt(domain) {
   return null;
 }
 
-// ===== DNS checks (paralelos) =====
+// ===== DNS checks (paralelos) con fallback por proveedor =====
+async function queryTypeWithFallback(domain, type) {
+  // intenta en carrera; si falla, prueba secuencial por proveedor
+  try {
+    return parseAnswers(await doh(domain, type));
+  } catch (_) {
+    for (const p of ["google","cloudflare","quad9","dnssb"]) {
+      try { return parseAnswers(await dohProviders[p](domain, type)); } catch(__){}
+    }
+    return [];
+  }
+}
+
 async function checkDNS(domain) {
   const results = {};
   const types = ["A","AAAA","NS","MX","SOA","CAA","TXT","DS"];
-  const tasks = types.map(t => doh(domain, t).then(json => ({t, data: parseAnswers(json)})).catch(e => ({t, error: e.message})));
+  const tasks = types.map(async (t) => {
+    const data = await queryTypeWithFallback(domain, t);
+    if (data.length) log("OK", `${t}: ${data.map(x=>x.data).join(t==="MX"?" | ":", ")}`);
+    else log("INFO", `${t}: sin datos (posible bloqueo/CORS)`);
+    return { t, data };
+  });
   const settled = await Promise.all(tasks);
-
-  for (const r of settled) {
-    if (r.error) { log(/A|AAAA/.test(r.t) ? "WARN":"INFO", `${r.t}: ${r.error}`); continue; }
-    results[r.t] = r.data;
-    const joined = r.data.map(x=>x.data).join(r.t==="MX"?" | ":", ");
-    log("OK", `${r.t}: ${joined || "—"}`);
-  }
+  for (const r of settled) results[r.t] = r.data;
 
   // TXT → SPF
   const txtVals = (results.TXT||[]).map(x => String(x.data).replace(/^"|"$/g,""));
@@ -190,10 +214,9 @@ async function checkDNS(domain) {
 
   // DMARC
   try {
-    const d = await doh(`_dmarc.${domain}`, "TXT");
-    const ans = parseAnswers(d);
-    if (ans.length) {
-      const val = ans.map(x => x.data.replace(/^"|"$/g, "")).join("");
+    const d = await queryTypeWithFallback(`_dmarc.${domain}`, "TXT");
+    if (d.length) {
+      const val = d.map(x => x.data.replace(/^"|"$/g, "")).join("");
       results.DMARC = val;
       const pol = /;?\s*p=(none|quarantine|reject)\s*;?/i.exec(val)?.[1]?.toLowerCase() || "none?";
       const rua = /rua=([^;]+)/i.exec(val)?.[1] || "";
@@ -274,7 +297,7 @@ function renderRDAP(domain, rdap) {
 
 function renderObservatory(domain, obs) {
   if (!obs) {
-    obsEl.innerHTML = `<p>${badge("Observatory no disponible (CORS o error temporal)", "info")} <a target="_blank" rel="noreferrer" href="https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}">Abrir reporte</a></p>`;
+    obsEl.innerHTML = `<p>${badge("Observatory no disponible (CORS/limits)", "info")} <a target="_blank" rel="noreferrer" href="https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}">Abrir reporte</a></p>`;
     return;
   }
   const rows = [];
@@ -300,12 +323,15 @@ function renderExtra(domain, dnsData, hsts, mta, tlsrpt, secTxt) {
   if (hsts) {
     const st = safeText(hsts.status || "unknown");
     rows.push(`<div><strong>HSTS Preload:</strong> ${badge(st, st==="preloaded"?"ok":(st==="unknown"?"info":"warn"))}</div>`);
+    if (Array.isArray(hsts.errors) && hsts.errors.length) {
+      rows.push(`<details><summary>Errores de preload</summary><code>${safeText(hsts.errors.join("\\n"))}</code></details>`);
+    }
   } else {
     rows.push(`<div>${badge("HSTS preload no disponible", "info")} <a target="_blank" rel="noreferrer" href="https://hstspreload.org/">Ver sitio</a></div>`);
   }
   if (mta?.dns || mta?.policy) {
     rows.push(`<div><strong>MTA-STS:</strong> ${mta.dns?badge("TXT","ok"):badge("TXT ausente","warn")} ${mta.policy?badge("policy","ok"):badge("policy ausente","warn")}</div>`);
-    if (mta.policy) rows.push(`<details><summary>Ver política</summary><code>${safeText(mta.policy)}</code></details>`);
+    if (mta.policy) rows.push(`<details><summary>Política MTA-STS</summary><code>${safeText(mta.policy)}</code></details>`);
   } else {
     rows.push(`<div>${badge("MTA-STS no disponible", "info")}</div>`);
   }
@@ -338,7 +364,7 @@ async function runScan() {
     return;
   }
 
-  btn.disabled = true; dnsBtn.disabled = true; fastModeEl.disabled = true;
+  btn.disabled = true; dnsBtn.disabled = true; fastModeEl.disabled = false;
   logEl.textContent = ""; dnsEl.innerHTML = ""; rdapEl.innerHTML = ""; extraEl.innerHTML = ""; summaryEl.innerHTML = ""; obsEl.innerHTML = "";
   log("INFO", `Iniciando auditoría para ${domain} (DNS ${dnsMode}, timeout ${DEFAULT_TIMEOUT}ms, modo ${fastModeEl.checked?"rápido":"completo"})`);
 
@@ -351,11 +377,11 @@ async function runScan() {
     let rdapJson = null;
     const rdapTask = rdapDomain(domain).then(j=>{rdapJson=j; log("OK","RDAP obtenido");}).catch(e=>log("INFO",`RDAP no disponible — ${e.message}`));
 
-    // 3) Observatory v2 (no bloqueante en modo rápido)
-    const obsTask = observatoryV2(domain).then(j=>{ log("OK", `Observatory: ${j.grade} (${j.score})`); return j; })
+    // 3) Observatory v2
+    const obsTask = observatoryV2(domain).then(j=>{ if(j){ log("OK", `Observatory: ${j.grade} (${j.score})`);} return j; })
       .catch(e=>{ log("INFO", `Observatory v2 ND — ${e.message}`); return null; });
 
-    // 4) Extras (HSTS/MTA-STS/TLS-RPT/security.txt)
+    // 4) Extras
     const extraTasks = [
       hstsPreload(domain).catch(e=>{log("INFO",`HSTS preload ND — ${e.message}`); return null;}),
       checkMtaSts(domain).catch(_=>null),
@@ -367,7 +393,6 @@ async function runScan() {
     let extraResults = null;
 
     if (fastModeEl.checked) {
-      // esperar poco; render parcial si se demora
       [obsResult] = await Promise.race([
         Promise.all([obsTask]),
         new Promise(res => setTimeout(()=>res([null]), 2500))
@@ -389,7 +414,7 @@ async function runScan() {
     renderExtra(domain, dnsData, hsts, mta, tlsrpt, sectxt);
     summarize(domain, dnsData, !!rdapJson, obsResult);
 
-    log("INFO", "Listo. Fuentes: DoH, RDAP, HSTS, Observatory v2, MTA-STS/TLS-RPT, security.txt.");
+    log("INFO", "Listo. Fuentes: DoH (Google/Cloudflare/Quad9/DNS.SB), RDAP, HSTS, Observatory v2, MTA-STS/TLS-RPT, security.txt.");
   } catch (e) {
     log("ERROR", e.message || String(e));
   } finally {
@@ -401,8 +426,11 @@ btn.addEventListener("click", runScan);
 input.addEventListener("keydown", (e) => { if (e.key === "Enter") runScan(); });
 
 dnsBtn.addEventListener("click", () => {
-  if (dnsMode === "auto") { dnsMode = "google"; dnsBtn.textContent = "DNS: Google"; }
-  else if (dnsMode === "google") { dnsMode = "cloudflare"; dnsBtn.textContent = "DNS: Cloudflare"; }
-  else { dnsMode = "auto"; dnsBtn.textContent = "DNS: Auto (race)"; }
+  const order = ["auto","google","cloudflare","quad9","dnssb"];
+  const i = order.indexOf(dnsMode);
+  const next = order[(i+1)%order.length];
+  dnsMode = next;
+  const label = next==="auto" ? "DNS: Auto (race)" : `DNS: ${next[0].toUpperCase()+next.slice(1)}`;
+  dnsBtn.textContent = label;
   log("INFO", `Proveedor DoH cambiado a: ${dnsMode}`);
 });

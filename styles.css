@@ -43,6 +43,16 @@ main { padding: 12px; max-width: 1100px; margin: 0 auto; }
 
 .row { display: flex; gap: 8px; align-items: center; }
 .row.wrap { flex-wrap: wrap; }
+.row.split { justify-content: space-between; }
+
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+.options { display: flex; align-items: center; gap: 10px; }
+
+@media (max-width: 640px) {
+  .btn-group { width: 100%; }
+  .btn-group button { flex: 1 1 100%; }
+  .options { width: 100%; justify-content: flex-start; }
+}
 
 input {
   flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border);
@@ -56,7 +66,7 @@ button.ghost { background: transparent; color: var(--text); border: 1px solid va
 button:active { transform: scale(0.98); }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.switch { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.switch { display: inline-flex; align-items: center; gap: 8px; }
 .switch input { width: 18px; height: 18px; }
 
 .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
