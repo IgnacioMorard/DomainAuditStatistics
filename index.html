@@ -2,24 +2,27 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Auditoría Pública de Dominio (DNS + RDAP)</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <h1>🔍 Auditoría Pública de Dominio</h1>
-    <p class="subtitle">DNS, RDAP y parámetros públicos — listo para GitHub Pages</p>
+    <p class="subtitle">DNS, RDAP y parámetros públicos</p>
   </header>
 
   <main>
     <section class="card">
       <label for="domain">Dominio</label>
       <div class="row">
-        <input id="domain" type="text" placeholder="ej: example.com" />
-        <button id="scanBtn">Escanear</button>
+        <input id="domain" type="text" placeholder="ej: example.com" inputmode="url" autocomplete="off" />
       </div>
-      <p class="hint">Este escáner usa solo fuentes públicas (DNS sobre HTTPS y RDAP) y no realiza acciones intrusivas.</p>
+      <div class="row">
+        <button id="scanBtn">Escanear</button>
+        <button id="providerBtn" class="ghost">DNS: Auto</button>
+      </div>
+      <p class="hint">Usa DNS sobre HTTPS (Google / Cloudflare) y RDAP. Solo lee fuentes públicas. Optimizado para móviles.</p>
     </section>
 
     <section class="grid">
@@ -37,6 +40,11 @@
         <h2>RDAP / WHOIS</h2>
         <div id="rdapResults" class="results"></div>
       </div>
+
+      <div class="card">
+        <h2>Infra & SSL (público)</h2>
+        <div id="infraResults" class="results"></div>
+      </div>
     </section>
 
     <section class="card">
@@ -46,7 +54,7 @@
   </main>
 
   <footer>
-    <p>Solo parámetros públicos | Fuentes: <a href="https://dns.google/" target="_blank" rel="noreferrer">dns.google</a> y <a href="https://rdap.org" target="_blank" rel="noreferrer">rdap.org</a></p>
+    <p>Solo parámetros públicos | Fuentes: dns.google, cloudflare-dns.com, rdap.org, ipwho.is, ssllabs.com</p>
   </footer>
 
   <script src="app.js"></script>
