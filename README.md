@@ -1,29 +1,32 @@
-# Auditoría Pública de Dominio (DNS + RDAP)
+# Auditoría Pública de Dominio (DNS + RDAP) — v2.5
 
-Sitio estático (HTML/JS/CSS) listo para GitHub Pages que consulta **parámetros públicos** de un dominio:
+Sitio estático (HTML/JS/CSS) listo para GitHub Pages que consulta **parámetros públicos**:
 
-- DNS sobre HTTPS (dns.google + fallback Cloudflare): A, AAAA, NS, MX, SOA, TXT (SPF), CAA, DS (DNSSEC), DMARC (`_dmarc`)
-- RDAP (whois moderno) vía rdap.org (si el endpoint permite CORS en tu navegador; si no, se muestra link para abrir manualmente)
+- DNS sobre HTTPS (dns.google -> fallback cloudflare-dns)
+- RDAP (whois moderno) vía rdap.org (si CORS lo permite)
+- HSTS Preload API (hstspreload.org)
+- Mozilla HTTP Observatory (mejor esfuerzo; si CORS/cache no permite, se muestra enlace)
+- Enriquecimientos: PTR (reverse DNS) de la IP A, intento de DANE/TLSA, parsing SPF/DMARC
 
-**No** hace port scanning ni requests intrusivos. Es ideal para un portfolio o check rápido de configuración.
+## Pensado para mobile + web
+- Log visual robusto: buffer + `requestAnimationFrame`, auto-scroll con fix para iOS.
+- Altura del log adaptable, scroll táctil (`-webkit-overflow-scrolling: touch`).
+- Timeouts con `AbortController` para evitar cuelgues.
 
 ## Deploy en GitHub Pages
-
-1. Subí estos archivos (`index.html`, `app.js`, `styles.css`) a un repo nuevo.
-2. En el repo, Settings → Pages → **Source: Deploy from a branch**, **Branch: main**, carpeta `/root`.
-3. Accedé a `https://<tu-usuario>.github.io/<tu-repo>/`
+1. Subí `index.html`, `app.js`, `styles.css` al repo.
+2. Settings → Pages → Deploy from a branch (main, root).
+3. Abre `https://<usuario>.github.io/<repo>/`
 
 ## Desarrollo local
-Basta con abrir `index.html` en el navegador. (Sugerido: usar un server simple para evitar problemas de CORS locales.)
-
 ```bash
 python -m http.server 8080
-# luego visita http://localhost:8080
+# http://localhost:8080
 ```
 
-## Notas técnicas
-- DNS via DoH: Primario `https://dns.google/resolve`, fallback `https://cloudflare-dns.com/dns-query?ct=application/dns-json`.
-- RDAP: `https://rdap.org/domain/<dominio>` (si CORS del registry lo permite; si no, ver enlace en la sección RDAP de la app).
-- DMARC: consultando `TXT` en `_dmarc.<dominio>` y parseando `p=` (`none|quarantine|reject`).
-- CAA: restringe emisores de certificados. Recomendado añadir.
-- DNSSEC: detección via existencia de `DS` y/o `AD=true` en la respuesta.
+## Fuentes
+- DoH Google: `https://dns.google/resolve?name=...&type=...`
+- DoH Cloudflare: `https://cloudflare-dns.com/dns-query?ct=application/dns-json&name=...&type=...`
+- RDAP: `https://rdap.org/domain/<dominio>`
+- HSTS preload: `https://hstspreload.org/api/v2/status?domain=<dominio>`
+- Mozilla Observatory: `https://http-observatory.security.mozilla.org/api/v1/*`

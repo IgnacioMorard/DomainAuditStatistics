@@ -2,24 +2,25 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="theme-color" content="#11162b" />
   <title>Auditoría Pública de Dominio (DNS + RDAP)</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <h1>🔍 Auditoría Pública de Dominio</h1>
-    <p class="subtitle">DNS, RDAP y parámetros públicos — listo para GitHub Pages</p>
+    <p class="subtitle">DNS, RDAP y parámetros públicos — versión 2.5</p>
   </header>
 
   <main>
     <section class="card">
       <label for="domain">Dominio</label>
       <div class="row">
-        <input id="domain" type="text" placeholder="ej: example.com" />
+        <input id="domain" type="text" placeholder="ej: example.com" inputmode="url" autocomplete="off" />
         <button id="scanBtn">Escanear</button>
       </div>
-      <p class="hint">Este escáner usa solo fuentes públicas (DNS sobre HTTPS y RDAP) y no realiza acciones intrusivas.</p>
+      <p class="hint">Solo se consultan fuentes públicas (DNS sobre HTTPS, RDAP y APIs públicas). No se hacen acciones intrusivas.</p>
     </section>
 
     <section class="grid">
@@ -37,16 +38,21 @@
         <h2>RDAP / WHOIS</h2>
         <div id="rdapResults" class="results"></div>
       </div>
+
+      <div class="card">
+        <h2>Checks extra</h2>
+        <div id="extraResults" class="results"></div>
+      </div>
     </section>
 
     <section class="card">
       <h2>Log</h2>
-      <pre id="log" class="log"></pre>
+      <div id="log" class="log" role="log" aria-live="polite"></div>
     </section>
   </main>
 
   <footer>
-    <p>Solo parámetros públicos | Fuentes: <a href="https://dns.google/" target="_blank" rel="noreferrer">dns.google</a> y <a href="https://rdap.org" target="_blank" rel="noreferrer">rdap.org</a></p>
+    <p>Solo parámetros públicos | Fuentes: dns.google, cloudflare-dns.com, rdap.org, hstspreload.org, http-observatory.security.mozilla.org</p>
   </footer>
 
   <script src="app.js"></script>

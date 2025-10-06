@@ -21,44 +21,53 @@ body {
 }
 
 header {
-  padding: 32px 20px 10px;
+  padding: 24px 16px 6px;
   text-align: center;
 }
-h1 { margin: 0 0 6px; font-size: 28px; }
-.subtitle { color: var(--muted); margin-top: 4px; }
+h1 { margin: 0 0 6px; font-size: clamp(22px, 4vw, 28px); }
+.subtitle { color: var(--muted); margin-top: 4px; font-size: 14px; }
 
-main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+main { padding: 12px; max-width: 1100px; margin: 0 auto; }
 
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  padding: 16px;
+  padding: 14px;
   border-radius: 14px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  grid-gap: 16px;
+  grid-gap: 12px;
 }
 
 .row { display: flex; gap: 8px; }
+
 input {
-  flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
-  background: #0e1530; color: var(--text);
+  flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border);
+  background: #0e1530; color: var(--text); font-size: 16px;
 }
 button {
-  padding: 10px 14px; background: var(--accent); color: white; border: none;
-  border-radius: 10px; cursor: pointer; font-weight: 600;
+  padding: 12px 14px; background: var(--accent); color: white; border: none;
+  border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 16px;
 }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
 
 .results code, .log { background: #0b122b; border: 1px solid var(--border); padding: 10px; border-radius: 10px; display: block; }
-.log { max-height: 320px; overflow: auto; }
+.log {
+  max-height: 45vh; overflow: auto; font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+  -webkit-overflow-scrolling: touch;
+}
+.log .line { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; padding: 2px 0; }
+.log .INFO { color: #9ab4ff; }
+.log .OK { color: var(--ok); }
+.log .WARN { color: var(--warn); }
+.log .ERROR, .log .CRITICAL { color: var(--err); }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
 .badge.ok { background: rgba(74, 222, 128, .15); color: var(--ok); border: 1px solid rgba(74, 222, 128, .35); }
@@ -67,4 +76,4 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .badge.info { background: rgba(59, 130, 246, .15); color: var(--accent); border: 1px solid rgba(59, 130, 246, .35); }
 
 ul { padding-left: 18px; }
-footer { text-align: center; color: var(--muted); padding: 24px 0 42px; font-size: 13px; }
+footer { text-align: center; color: var(--muted); padding: 24px 0 42px; font-size: 12px; }
