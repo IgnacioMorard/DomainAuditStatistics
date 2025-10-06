@@ -24,7 +24,7 @@ header { padding: 24px 16px 6px; text-align: center; }
 h1 { margin: 0 0 6px; font-size: clamp(22px, 4vw, 28px); }
 .subtitle { color: var(--muted); margin-top: 4px; font-size: 14px; }
 
-main { padding: 12px; max-width: 1100px; margin: 0 auto; }
+main { padding: 12px; max-width: 1200px; margin: 0 auto; }
 
 .card {
   background: var(--card);

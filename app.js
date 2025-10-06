@@ -5,8 +5,11 @@ const logEl = $("#log");
 const dnsEl = $("#dnsResults");
 const rdapEl = $("#rdapResults");
 const summaryEl = $("#summary");
-const extraEl = $("#extraResults");
 const obsEl = $("#obsResults");
+const hstsEl = $("#hstsResults");
+const emailEl = $("#emailSecResults");
+const secTxtEl = $("#secTxtResults");
+const infraEl = $("#infraResults");
 const btn = $("#scanBtn");
 const dnsBtn = $("#dnsBtn");
 const input = $("#domain");
@@ -35,7 +38,6 @@ function flushLog() {
     frag.appendChild(div);
   }
   logEl.appendChild(frag);
-  // auto-scroll para iOS/Safari
   setTimeout(() => { logEl.scrollTop = logEl.scrollHeight; }, 0);
   rafScheduled = false;
 }
@@ -87,10 +89,7 @@ function dohRace(name, type="A", providers=["google","cloudflare","quad9","dnssb
   );
   return Promise.race(racers).then(first => {
     if (first.ok) { log("INFO", `DoH respondió primero: ${first.p}`); return first.v; }
-    // si la primera en resolver fue una falla (raro), probar secuencial
-    for (const p of providers) {
-      return dohProviders[p](name, type).catch(()=>{});
-    }
+    for (const p of providers) { return dohProviders[p](name, type).catch(()=>{}); }
   });
 }
 
@@ -99,7 +98,6 @@ async function doh(name, type="A") {
     if (dnsMode in dohProviders) return await dohProviders[dnsMode](name, type);
     return await dohRace(name, type);
   } catch (e) {
-    // fallback secuencial completo
     for (const p of ["google","cloudflare","quad9","dnssb"]) {
       try { return await dohProviders[p](name, type); } catch(_){}
     }
@@ -121,14 +119,12 @@ const hstsPreload = (d) => fetchJson(`https://hstspreload.org/api/v2/status?doma
 // Observatory v2 (MDN) con robustez: POST preferente; si falla por CORS/5xx, intento GET
 async function observatoryV2(domain) {
   const url = `https://observatory-api.mdn.mozilla.net/api/v2/scan?host=${encodeURIComponent(domain)}`;
-  // intento POST
   try {
     const r = await fetchWithTimeout(url, { method: "POST", mode: "cors", cache: "no-store", headers: { "accept": "application/json" } });
     if (!r.ok) throw new Error(`Observatory v2 HTTP ${r.status}`);
     return await r.json();
   } catch (e) {
     log("INFO", `Observatory POST falló (${e.message}). Intento GET (cache)…`);
-    // intento GET (algunos CDNs permiten GET cache)
     try {
       const r2 = await fetchWithTimeout(url, { method: "GET", mode: "cors", cache: "no-store", headers: { "accept": "application/json" } });
       if (!r2.ok) throw new Error(`Observatory v2 GET HTTP ${r2.status}`);
@@ -153,11 +149,11 @@ async function checkMtaSts(domain) {
     const ans = parseAnswers(r);
     txt = ans.map(x=>x.data.replace(/^"|"$/g,"")).join("");
   } catch(e) {}
-  let policy = null;
+  let policy = null, policyUrl = null;
   for (const host of [`mta-sts.${domain}`, domain]) {
-    try { policy = await fetchText(`https://${host}/.well-known/mta-sts.txt`); break; } catch(_){}
+    try { policyUrl = `https://${host}/.well-known/mta-sts.txt`; policy = await fetchText(policyUrl); break; } catch(_){}
   }
-  return { dns: txt, policy };
+  return { dns: txt, policy, policyUrl };
 }
 async function checkTlsRpt(domain) {
   try {
@@ -169,15 +165,24 @@ async function checkTlsRpt(domain) {
 }
 async function checkSecurityTxt(domain) {
   for (const host of [domain, `www.${domain}`]) {
-    try { const t = await fetchText(`https://${host}/.well-known/security.txt`); return { host, text: t }; }
+    try { const url = `https://${host}/.well-known/security.txt`; const t = await fetchText(url); return { host, text: t, url }; }
     catch(_){}
   }
   return null;
 }
 
+// Infra (ipwho.is) para la primera IPv4 A
+async function fetchInfraFromA(dnsData) {
+  const firstA = dnsData?.A?.find(x => /^\d+\.\d+\.\d+\.\d+$/.test(x.data))?.data;
+  if (!firstA) return null;
+  try {
+    const j = await fetchJson(`https://ipwho.is/${encodeURIComponent(firstA)}`);
+    return { ip: firstA, data: j };
+  } catch(e) { return { ip: firstA, error: e.message }; }
+}
+
 // ===== DNS checks (paralelos) con fallback por proveedor =====
 async function queryTypeWithFallback(domain, type) {
-  // intenta en carrera; si falla, prueba secuencial por proveedor
   try {
     return parseAnswers(await doh(domain, type));
   } catch (_) {
@@ -200,7 +205,6 @@ async function checkDNS(domain) {
   const settled = await Promise.all(tasks);
   for (const r of settled) results[r.t] = r.data;
 
-  // TXT → SPF
   const txtVals = (results.TXT||[]).map(x => String(x.data).replace(/^"|"$/g,""));
   const spf = txtVals.find(v => v.toLowerCase().includes("v=spf1"));
   if (spf) {
@@ -212,7 +216,6 @@ async function checkDNS(domain) {
     log("WARN", "SPF: no encontrado");
   }
 
-  // DMARC
   try {
     const d = await queryTypeWithFallback(`_dmarc.${domain}`, "TXT");
     if (d.length) {
@@ -230,7 +233,6 @@ async function checkDNS(domain) {
     }
   } catch (e) { log("INFO", `DMARC: ${e.message}`); }
 
-  // DNSSEC quick
   const hasDS = (results.DS||[]).length>0;
   results.DNSSEC = hasDS;
   log(hasDS ? "OK" : "WARN", hasDS ? "DNSSEC: DS presente" : "DNSSEC: no detectado");
@@ -318,31 +320,79 @@ function renderObservatory(domain, obs) {
   obsEl.innerHTML = rows.join("\n");
 }
 
-function renderExtra(domain, dnsData, hsts, mta, tlsrpt, secTxt) {
+function renderHSTS(domain, hsts) {
+  if (!hsts) {
+    hstsEl.innerHTML = `<p>${badge("No disponible", "info")} <a target="_blank" rel="noreferrer" href="https://hstspreload.org/?domain=${encodeURIComponent(domain)}">Abrir HSTS Preload</a></p>`;
+    return;
+  }
+  const st = safeText(hsts.status || "unknown");
+  const type = st==="preloaded" ? "ok" : (st==="unknown" ? "info" : "warn");
   const rows = [];
-  if (hsts) {
-    const st = safeText(hsts.status || "unknown");
-    rows.push(`<div><strong>HSTS Preload:</strong> ${badge(st, st==="preloaded"?"ok":(st==="unknown"?"info":"warn"))}</div>`);
-    if (Array.isArray(hsts.errors) && hsts.errors.length) {
-      rows.push(`<details><summary>Errores de preload</summary><code>${safeText(hsts.errors.join("\\n"))}</code></details>`);
-    }
-  } else {
-    rows.push(`<div>${badge("HSTS preload no disponible", "info")} <a target="_blank" rel="noreferrer" href="https://hstspreload.org/">Ver sitio</a></div>`);
+  rows.push(`<div><strong>Estado:</strong> ${badge(st, type)}</div>`);
+  if (Array.isArray(hsts.errors) && hsts.errors.length) {
+    rows.push(`<details><summary>Errores</summary><code>${safeText(hsts.errors.join("\\n"))}</code></details>`);
   }
-  if (mta?.dns || mta?.policy) {
-    rows.push(`<div><strong>MTA-STS:</strong> ${mta.dns?badge("TXT","ok"):badge("TXT ausente","warn")} ${mta.policy?badge("policy","ok"):badge("policy ausente","warn")}</div>`);
-    if (mta.policy) rows.push(`<details><summary>Política MTA-STS</summary><code>${safeText(mta.policy)}</code></details>`);
-  } else {
-    rows.push(`<div>${badge("MTA-STS no disponible", "info")}</div>`);
-  }
-  if (tlsrpt) rows.push(`<div><strong>TLS-RPT:</strong> <code>${safeText(tlsrpt)}</code></div>`);
-  else rows.push(`<div>${badge("TLS-RPT no encontrado", "info")}</div>`);
-  if (secTxt) rows.push(`<div><strong>security.txt:</strong> en ${safeText(secTxt.host)} <details><summary>Ver</summary><code>${safeText(secTxt.text)}</code></details></div>`);
-  else rows.push(`<div>${badge("security.txt no encontrado", "info")} <a target="_blank" rel="noreferrer" href="https://${safeText(domain)}/.well-known/security.txt">probar</a></div>`);
-  extraEl.innerHTML = rows.join("\n");
+  rows.push(`<div><a target="_blank" rel="noreferrer" href="https://hstspreload.org/?domain=${encodeURIComponent(domain)}">Ver detalle</a></div>`);
+  hstsEl.innerHTML = rows.join("\n");
 }
 
-function summarize(domain, dnsData, rdapOk, obs) {
+function renderEmailSec(domain, mta, tlsrpt) {
+  const rows = [];
+  // MTA-STS
+  const mtaTxt = mta?.dns ? badge("TXT", "ok") : badge("TXT ausente", "warn");
+  const mtaPol = mta?.policy ? badge("policy", "ok") : badge("policy ausente", "warn");
+  rows.push(`<div><strong>MTA-STS:</strong> ${mtaTxt} ${mtaPol}${mta?.policyUrl?` — <a target="_blank" rel="noreferrer" href="${safeText(mta.policyUrl)}">ver policy</a>`:""}</div>`);
+  if (mta?.policy) {
+    const mode = /mode\s*:\s*(enforce|testing|none)/i.exec(mta.policy)?.[1] || "?";
+    const mx = /mx\s*:\s*([^\n]+)/i.exec(mta.policy)?.[1] || "?";
+    const maxAge = /max_age\s*:\s*(\d+)/i.exec(mta.policy)?.[1] || "?";
+    rows.push(`<div>Modo: <code>${safeText(mode)}</code> · MX: <code>${safeText(mx)}</code> · max_age: <code>${safeText(maxAge)}</code></div>`);
+  }
+  // TLS-RPT
+  if (tlsrpt) {
+    const rua = /rua=mailto:([^;]+)/i.exec(tlsrpt)?.[1] || "?";
+    rows.push(`<div><strong>TLS-RPT:</strong> ${badge("TXT", "ok")} · Reportes a: <code>${safeText(rua)}</code></div>`);
+  } else {
+    rows.push(`<div><strong>TLS-RPT:</strong> ${badge("no encontrado","info")}</div>`);
+  }
+  emailEl.innerHTML = rows.join("\n");
+}
+
+function renderSecurityTxt(domain, sec) {
+  if (!sec) {
+    secTxtEl.innerHTML = `<p>${badge("No encontrado", "info")} <a target="_blank" rel="noreferrer" href="https://${safeText(domain)}/.well-known/security.txt">probar</a></p>`;
+    return;
+  }
+  const rows = [];
+  rows.push(`<div>Host: <code>${safeText(sec.host)}</code> — <a target="_blank" rel="noreferrer" href="${safeText(sec.url)}">ver archivo</a></div>`);
+  // parse campos interesantes (Contact, Expires, Policy, Acknowledgments)
+  const contact = (sec.text.match(/^Contact:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
+  const policy = (sec.text.match(/^Policy:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
+  const expires = (sec.text.match(/^Expires:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
+  if (contact.length) rows.push(`<div>Contact: ${contact.map(x=>`<code>${safeText(x)}</code>`).join(", ")}</div>`);
+  if (policy.length) rows.push(`<div>Policy: ${policy.map(x=>`<a target="_blank" rel="noreferrer" href="${safeText(x)}">link</a>`).join(", ")}</div>`);
+  if (expires.length) rows.push(`<div>Expires: ${expires.map(x=>`<code>${safeText(x)}</code>`).join(", ")}</div>`);
+  secTxtEl.innerHTML = rows.join("\n") + `<details style="margin-top:8px;"><summary>Ver contenido</summary><code>${safeText(sec.text)}</code></details>`;
+}
+
+function renderInfra(domain, infra) {
+  if (!infra) {
+    infraEl.innerHTML = `<p>${badge("Sin datos (no hay A IPv4)", "info")}</p>`;
+    return;
+  }
+  if (infra.error) {
+    infraEl.innerHTML = `<p>${badge("No disponible", "info")} (ipwho.is) · IP: <code>${safeText(infra.ip)}</code></p>`;
+    return;
+  }
+  const j = infra.data || {};
+  const rows = [];
+  rows.push(`<div>IP: <code>${safeText(infra.ip)}</code> · País: <code>${safeText(j.country || "?")}</code> · Ciudad: <code>${safeText(j.city || "?")}</code></div>`);
+  rows.push(`<div>ASN: <code>${safeText(j.connection?.asn || "?")}</code> · Org: <code>${safeText(j.connection?.org || "?")}</code> · ISP: <code>${safeText(j.connection?.isp || "?")}</code></div>`);
+  rows.push(`<div><a target="_blank" rel="noreferrer" href="https://ipwho.is/${encodeURIComponent(infra.ip)}">Ver detalle ipwho.is</a></div>`);
+  infraEl.innerHTML = rows.join("\n");
+}
+
+function summarize(domain, dnsData, rdapOk, obs, hsts, mta, tlsrpt, sec) {
   const items = [];
   if (dnsData.DNSSEC) items.push("✅ DNSSEC detectado"); else items.push("⚠️ DNSSEC no detectado");
   if (dnsData.CAA?.length) items.push("✅ CAA presente"); else items.push("⚠️ CAA ausente (recomendado)");
@@ -351,6 +401,10 @@ function summarize(domain, dnsData, rdapOk, obs) {
     const pol = /p=(none|quarantine|reject)/i.exec(dnsData.DMARC)?.[1] || "none?";
     items.push(`✅ DMARC presente (p=${pol})${pol.toLowerCase()==="none"?" ⚠️ considerar quarantine/reject":""}`);
   } else items.push("⚠️ DMARC ausente");
+  if (hsts?.status) items.push(`🌐 HSTS preload: ${hsts.status}`);
+  if (mta?.policy || mta?.dns) items.push("✉️ MTA-STS presente");
+  if (tlsrpt) items.push("📊 TLS-RPT presente");
+  if (sec) items.push("🛡️ security.txt presente");
   if (!rdapOk) items.push("ℹ️ RDAP no disponible por CORS (link manual).");
   if (obs?.grade) items.push(`🧪 Observatory: ${obs.grade} (${obs.score})`);
   summaryEl.innerHTML = list(items);
@@ -365,56 +419,57 @@ async function runScan() {
   }
 
   btn.disabled = true; dnsBtn.disabled = true; fastModeEl.disabled = false;
-  logEl.textContent = ""; dnsEl.innerHTML = ""; rdapEl.innerHTML = ""; extraEl.innerHTML = ""; summaryEl.innerHTML = ""; obsEl.innerHTML = "";
+  logEl.textContent = ""; dnsEl.innerHTML = ""; rdapEl.innerHTML = ""; summaryEl.innerHTML = "";
+  obsEl.innerHTML = ""; hstsEl.innerHTML = ""; emailEl.innerHTML = ""; secTxtEl.innerHTML = ""; infraEl.innerHTML = "";
   log("INFO", `Iniciando auditoría para ${domain} (DNS ${dnsMode}, timeout ${DEFAULT_TIMEOUT}ms, modo ${fastModeEl.checked?"rápido":"completo"})`);
 
   try {
-    // 1) DNS en paralelo
+    // 1) DNS
     const dnsData = await checkDNS(domain);
     renderDNS(domain, dnsData);
 
-    // 2) RDAP en paralelo
+    // 2) Infra (depende de A)
+    const infraTask = fetchInfraFromA(dnsData).then(x=>{ renderInfra(domain, x); return x; });
+
+    // 3) RDAP
     let rdapJson = null;
     const rdapTask = rdapDomain(domain).then(j=>{rdapJson=j; log("OK","RDAP obtenido");}).catch(e=>log("INFO",`RDAP no disponible — ${e.message}`));
 
-    // 3) Observatory v2
-    const obsTask = observatoryV2(domain).then(j=>{ if(j){ log("OK", `Observatory: ${j.grade} (${j.score})`);} return j; })
-      .catch(e=>{ log("INFO", `Observatory v2 ND — ${e.message}`); return null; });
+    // 4) Observatory
+    const obsTask = observatoryV2(domain).then(j=>{ if(j){ log("OK", `Observatory: ${j.grade} (${j.score})`);} renderObservatory(domain, j); return j; })
+      .catch(e=>{ log("INFO", `Observatory v2 ND — ${e.message}`); renderObservatory(domain, null); return null; });
 
-    // 4) Extras
-    const extraTasks = [
-      hstsPreload(domain).catch(e=>{log("INFO",`HSTS preload ND — ${e.message}`); return null;}),
-      checkMtaSts(domain).catch(_=>null),
-      checkTlsRpt(domain).catch(_=>null),
-      checkSecurityTxt(domain).catch(_=>null)
-    ];
+    // 5) HSTS / EmailSec / security.txt
+    const hstsTask = hstsPreload(domain).then(j=>{ renderHSTS(domain, j); return j; }).catch(_=>{ renderHSTS(domain, null); return null; });
+    const mtaTask = checkMtaSts(domain).then(j=>{ return j; }).catch(_=>null);
+    const tlsTask = checkTlsRpt(domain).then(j=>{ return j; }).catch(_=>null);
+    const secTask = checkSecurityTxt(domain).then(j=>{ renderSecurityTxt(domain, j); return j; }).catch(_=>{ renderSecurityTxt(domain, null); return null; });
 
-    let obsResult = null;
-    let extraResults = null;
-
+    let obsResult, hstsResult, mtaResult, tlsResult, secResult;
     if (fastModeEl.checked) {
-      [obsResult] = await Promise.race([
-        Promise.all([obsTask]),
-        new Promise(res => setTimeout(()=>res([null]), 2500))
-      ]);
-      renderObservatory(domain, obsResult);
-      extraResults = await Promise.race([
-        Promise.all(extraTasks),
-        new Promise(res => setTimeout(()=>res([null,null,null,null]), 3000))
+      // Mostrar rápido Observatory y HSTS si llegan, sin bloquear
+      [obsResult] = await Promise.race([Promise.all([obsTask]), new Promise(res=>setTimeout(()=>res([null]), 2500))]);
+      [hstsResult] = await Promise.race([Promise.all([hstsTask]), new Promise(res=>setTimeout(()=>res([null]), 2000))]);
+      [mtaResult, tlsResult, secResult] = await Promise.race([
+        Promise.all([mtaTask, tlsTask, secTask]), new Promise(res=>setTimeout(()=>res([null,null,null]), 2500))
       ]);
     } else {
       obsResult = await obsTask;
-      renderObservatory(domain, obsResult);
-      extraResults = await Promise.all(extraTasks);
+      hstsResult = await hstsTask;
+      mtaResult = await mtaTask;
+      tlsResult = await tlsTask;
+      secResult = await secTask;
     }
+    renderEmailSec(domain, mtaResult, tlsResult);
 
-    const [hsts, mta, tlsrpt, sectxt] = extraResults;
     await rdapTask;
-    renderRDAP(domain, rdapJson); // puede ser null (CORS)
-    renderExtra(domain, dnsData, hsts, mta, tlsrpt, sectxt);
-    summarize(domain, dnsData, !!rdapJson, obsResult);
+    renderRDAP(domain, rdapJson);
 
-    log("INFO", "Listo. Fuentes: DoH (Google/Cloudflare/Quad9/DNS.SB), RDAP, HSTS, Observatory v2, MTA-STS/TLS-RPT, security.txt.");
+    const infraResult = await infraTask;
+
+    summarize(domain, dnsData, !!rdapJson, obsResult, hstsResult, mtaResult, tlsResult, secResult);
+
+    log("INFO", "Listo. Fuentes: DoH (Google/Cloudflare/Quad9/DNS.SB), RDAP, Observatory v2, HSTS preload, MTA-STS/TLS-RPT, security.txt, ipwho.is.");
   } catch (e) {
     log("ERROR", e.message || String(e));
   } finally {

@@ -10,7 +10,7 @@
 <body>
   <header>
     <h1>🔍 Auditoría Pública de Dominio</h1>
-    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.8</p>
+    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.9</p>
   </header>
 
   <main>
@@ -31,7 +31,7 @@
           </label>
         </div>
       </div>
-      <p class="hint">Solo fuentes públicas (DoH, RDAP y APIs públicas). No intrusivo. En móvil, activá “Modo rápido”.</p>
+      <p class="hint">Fuentes públicas (DoH, RDAP, Observatory, etc.). No intrusivo. En móvil, activá “Modo rápido”.</p>
     </section>
 
     <section class="grid">
@@ -56,8 +56,23 @@
       </div>
 
       <div class="card">
-        <h2>Checks extra</h2>
-        <div id="extraResults" class="results"></div>
+        <h2>HSTS Preload</h2>
+        <div id="hstsResults" class="results"></div>
+      </div>
+
+      <div class="card">
+        <h2>Email Transport Security</h2>
+        <div id="emailSecResults" class="results"></div>
+      </div>
+
+      <div class="card">
+        <h2>security.txt</h2>
+        <div id="secTxtResults" class="results"></div>
+      </div>
+
+      <div class="card">
+        <h2>Infra (IP / ASN / ISP)</h2>
+        <div id="infraResults" class="results"></div>
       </div>
     </section>
 
@@ -68,7 +83,7 @@
   </main>
 
   <footer>
-    <p>Fuentes: dns.google, cloudflare-dns.com, rdap.org, hstspreload.org, observatory-api.mdn.mozilla.net</p>
+    <p>Fuentes: dns.google, cloudflare-dns.com, dns.quad9.net, doh.dns.sb, rdap.org, hstspreload.org, observatory-api.mdn.mozilla.net, ipwho.is</p>
   </footer>
 
   <script src="app.js"></script>
