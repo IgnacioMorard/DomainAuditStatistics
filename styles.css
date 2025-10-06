@@ -21,50 +21,44 @@ body {
 }
 
 header {
-  padding: 24px 16px 6px;
+  padding: 32px 20px 10px;
   text-align: center;
 }
-h1 { margin: 0 0 6px; font-size: clamp(22px, 4vw, 28px); }
-.subtitle { color: var(--muted); margin-top: 4px; font-size: 14px; }
+h1 { margin: 0 0 6px; font-size: 28px; }
+.subtitle { color: var(--muted); margin-top: 4px; }
 
-main { padding: 12px; max-width: 1100px; margin: 0 auto; }
+main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  padding: 14px;
+  padding: 16px;
   border-radius: 14px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  grid-gap: 12px;
+  grid-gap: 16px;
 }
 
 .row { display: flex; gap: 8px; }
-
 input {
-  flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border);
-  background: #0e1530; color: var(--text); font-size: 16px;
+  flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: #0e1530; color: var(--text);
 }
-
 button {
-  padding: 12px 14px; background: var(--accent); color: white; border: none;
-  border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 16px; flex: 1;
+  padding: 10px 14px; background: var(--accent); color: white; border: none;
+  border-radius: 10px; cursor: pointer; font-weight: 600;
 }
-button.ghost {
-  background: transparent; color: var(--text); border: 1px solid var(--border); flex: 1;
-}
-button:active { transform: scale(0.98); }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
 
 .results code, .log { background: #0b122b; border: 1px solid var(--border); padding: 10px; border-radius: 10px; display: block; }
-.log { max-height: 45vh; overflow: auto; font-size: 12px; }
+.log { max-height: 320px; overflow: auto; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
 .badge.ok { background: rgba(74, 222, 128, .15); color: var(--ok); border: 1px solid rgba(74, 222, 128, .35); }
@@ -73,4 +67,4 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .badge.info { background: rgba(59, 130, 246, .15); color: var(--accent); border: 1px solid rgba(59, 130, 246, .35); }
 
 ul { padding-left: 18px; }
-footer { text-align: center; color: var(--muted); padding: 24px 0 42px; font-size: 12px; }
+footer { text-align: center; color: var(--muted); padding: 24px 0 42px; font-size: 13px; }

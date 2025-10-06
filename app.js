@@ -5,12 +5,8 @@ const logEl = $("#log");
 const dnsEl = $("#dnsResults");
 const rdapEl = $("#rdapResults");
 const summaryEl = $("#summary");
-const infraEl = $("#infraResults");
 const btn = $("#scanBtn");
-const providerBtn = $("#providerBtn");
 const input = $("#domain");
-
-let providerMode = "auto"; // auto | google | cloudflare
 
 const log = (level, msg) => {
   const line = `[${new Date().toLocaleTimeString()}] ${level}: ${msg}`;
@@ -19,43 +15,28 @@ const log = (level, msg) => {
 };
 
 const badge = (txt, type = "info") => `<span class="badge ${type}">${txt}</span>`;
+
 const safeText = (v) => String(v ?? "").replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]));
 
-function withTimeout(promise, ms, label="operación") {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(`${label} timeout ${ms}ms`), ms);
-  return Promise.race([
-    promise(ctrl.signal),
-    new Promise((_, rej) => ctrl.signal.addEventListener("abort", () => rej(new Error(ctrl.signal.reason || "timeout"))))
-  ]).finally(() => clearTimeout(t));
-}
-
-// ===== DNS over HTTPS: Google -> fallback Cloudflare (o elección manual) =====
-async function dohGoogle(name, type = "A", signal) {
+// ===== DNS over HTTPS: Google -> fallback Cloudflare =====
+async function dohGoogle(name, type = "A") {
   const url = `https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`;
-  const res = await fetch(url, { headers: { "accept": "application/dns-json" }, mode: "cors", cache: "no-store", signal });
+  const res = await fetch(url, { headers: { "accept": "application/dns-json" }, mode: "cors", cache: "no-store" });
   if (!res.ok) throw new Error(`dns.google ${type} -> HTTP ${res.status}`);
   return res.json();
 }
-async function dohCloudflare(name, type = "A", signal) {
+async function dohCloudflare(name, type = "A") {
   const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}&ct=application/dns-json`;
-  const res = await fetch(url, { headers: { "accept": "application/dns-json" }, mode: "cors", cache: "no-store", signal });
+  const res = await fetch(url, { headers: { "accept": "application/dns-json" }, mode: "cors", cache: "no-store" });
   if (!res.ok) throw new Error(`cloudflare-dns ${type} -> HTTP ${res.status}`);
   return res.json();
 }
 async function doh(name, type = "A") {
-  const tryGoogle = (signal) => dohGoogle(name, type, signal);
-  const tryCloudflare = (signal) => dohCloudflare(name, type, signal);
-
-  if (providerMode === "google") return withTimeout(tryGoogle, 9000, `DoH Google ${type}`);
-  if (providerMode === "cloudflare") return withTimeout(tryCloudflare, 9000, `DoH Cloudflare ${type}`);
-
-  // auto: google -> cloudflare
   try {
-    return await withTimeout(tryGoogle, 9000, `DoH Google ${type}`);
+    return await dohGoogle(name, type);
   } catch (e1) {
     log("INFO", `Fallo dns.google (${type}): ${e1.message} — usando fallback Cloudflare`);
-    return await withTimeout(tryCloudflare, 9000, `DoH Cloudflare ${type}`);
+    return await dohCloudflare(name, type);
   }
 }
 
@@ -86,22 +67,6 @@ function extractRdapSummary(rdap) {
     out.nameservers = (rdap.nameservers || []).map(ns => ns.ldhName || ns.handle).filter(Boolean);
   } catch {}
   return out;
-}
-
-// ===== Infra: ISP/ASN via ipwho.is y SSL Labs (opcional) =====
-async function ipInfo(ip) {
-  const url = `https://ipwho.is/${encodeURIComponent(ip)}`;
-  const res = await fetch(url, { mode: "cors", cache: "no-store" });
-  if (!res.ok) throw new Error(`ipwho.is HTTP ${res.status}`);
-  return res.json();
-}
-
-async function sslLabs(domain) {
-  // fromCache=on para evitar scans largos; si no hay cache, probablemente error o "IN_PROGRESS"
-  const url = `https://api.ssllabs.com/api/v3/analyze?host=${encodeURIComponent(domain)}&all=done&fromCache=on&ignoreMismatch=on`;
-  const res = await fetch(url, { mode: "cors", cache: "no-store" });
-  if (!res.ok) throw new Error(`SSL Labs HTTP ${res.status}`);
-  return res.json();
 }
 
 // ===== Chequeos DNS =====
@@ -186,7 +151,7 @@ async function checkDNS(domain) {
     const ds = await doh(domain, "DS");
     results.DS = parseAnswers(ds);
     const hasDS = results.DS.length > 0;
-    const ad = !!ds.AD;
+    const ad = !!ds.AD; // authenticated data flag from validating resolver
     if (hasDS || ad) {
       log("OK", `DNSSEC: ${hasDS ? "DS presente" : ""} ${ad ? "(AD=true)" : ""}`.trim());
       results.DNSSEC = true;
@@ -244,29 +209,6 @@ function renderRDAP(domain, rdap) {
   rdapEl.innerHTML = rows.join("\n") + `<details style="margin-top:8px;"><summary>Ver JSON RDAP completo</summary><code>${safeText(JSON.stringify(rdap, null, 2))}</code></details>`;
 }
 
-function renderInfra(domain, dnsData, ipInfoData, sslData) {
-  const rows = [];
-  // IP/ASN/ISP
-  if (ipInfoData) {
-    rows.push(`<div><strong>IP:</strong> ${safeText(ipInfoData.ip)} — <strong>ASN:</strong> ${safeText(ipInfoData.connection?.asn || ipInfoData.asn || "—")}</div>`);
-    rows.push(`<div><strong>Org/ISP:</strong> ${safeText(ipInfoData.connection?.org || ipInfoData.org || ipInfoData.isp || "—")}</div>`);
-    rows.push(`<div><strong>País:</strong> ${safeText(ipInfoData.country || ipInfoData.country_code || "—")}</div>`);
-  } else {
-    rows.push(`<div>${badge("No se pudo obtener info de IP (ipwho.is)", "warn")}</div>`);
-  }
-
-  // SSL Labs (si hay)
-  if (sslData?.endpoints?.length) {
-    const ep = sslData.endpoints[0];
-    const grade = ep.grade || ep.gradeTrustIgnored || "N/A";
-    rows.push(`<div><strong>SSL Labs (cache):</strong> Grade ${safeText(grade)} — <a href="https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(domain)}" target="_blank" rel="noreferrer">ver detalle</a></div>`);
-  } else {
-    rows.push(`<div>${badge("SSL Labs (cache) no disponible", "info")} <a href="https://www.ssllabs.com/ssltest/analyze.html?d=${encodeURIComponent(domain)}" target="_blank" rel="noreferrer">Abrir análisis</a></div>`);
-  }
-
-  infraEl.innerHTML = rows.join("\n");
-}
-
 function summarize(domain, dnsData, rdapSummaryOk) {
   const items = [];
   if (dnsData.DNSSEC) items.push("✅ DNSSEC detectado");
@@ -297,33 +239,16 @@ async function runScan() {
   }
 
   btn.disabled = true;
-  providerBtn.disabled = true;
   logEl.textContent = "";
   dnsEl.innerHTML = "";
   rdapEl.innerHTML = "";
-  infraEl.innerHTML = "";
   summaryEl.innerHTML = "";
-  log("INFO", `Iniciando auditoría para ${domain} (provider: ${providerMode})`);
+  log("INFO", `Iniciando auditoría para ${domain}`);
 
   try {
     const dnsData = await checkDNS(domain);
     renderDNS(domain, dnsData);
 
-    // IP info (first A record)
-    let ipInfoData = null;
-    const firstA = dnsData?.A?.[0]?.data?.replace(/\.$/, "");
-    if (firstA && /^[0-9.]+$/.test(firstA)) {
-      try {
-        ipInfoData = await ipInfo(firstA);
-        log("OK", `ipwho.is: ${firstA} -> ${ipInfoData.connection?.org || ipInfoData.org || ipInfoData.isp || "?"}`);
-      } catch (e) {
-        log("WARN", `ipwho.is error: ${e.message}`);
-      }
-    } else {
-      log("INFO", "No se encontró IP A para consultar proveedor/ASN");
-    }
-
-    // RDAP
     let rdapJson = null;
     try {
       rdapJson = await rdapDomain(domain);
@@ -333,37 +258,15 @@ async function runScan() {
     }
     renderRDAP(domain, rdapJson);
 
-    // SSL Labs (desde cache si CORS lo permite)
-    let sslData = null;
-    try {
-      sslData = await sslLabs(domain);
-      if (sslData?.status === "READY" || sslData?.status === "ERROR" || sslData?.status === "DNS") {
-        log("OK", "SSL Labs (fromCache) consultado");
-      } else {
-        log("INFO", `SSL Labs status: ${sslData?.status}`);
-      }
-    } catch (e) {
-      log("INFO", `SSL Labs no disponible desde el navegador — se mostrará enlace`);
-    }
-
-    renderInfra(domain, dnsData, ipInfoData, sslData);
     summarize(domain, dnsData, !!rdapJson);
 
-    log("INFO", "Listo. Solo se consultaron fuentes públicas (DoH + RDAP + ipwho.is + SSL Labs cache).");
+    log("INFO", "Listo. Solo se consultaron fuentes públicas (DoH + RDAP).");
   } catch (e) {
     log("ERROR", e.message || String(e));
   } finally {
     btn.disabled = false;
-    providerBtn.disabled = false;
   }
 }
 
 btn.addEventListener("click", runScan);
 input.addEventListener("keydown", (e) => { if (e.key === "Enter") runScan(); });
-
-providerBtn.addEventListener("click", () => {
-  if (providerMode === "auto") { providerMode = "google"; providerBtn.textContent = "DNS: Google"; }
-  else if (providerMode === "google") { providerMode = "cloudflare"; providerBtn.textContent = "DNS: Cloudflare"; }
-  else { providerMode = "auto"; providerBtn.textContent = "DNS: Auto"; }
-  log("INFO", `Proveedor DoH cambiado a: ${providerMode}`);
-});
