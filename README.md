@@ -1,16 +1,9 @@
-# Auditoría Pública de Dominio — v2.9
+# v3.1 — Sin proxy, con MXToolbox y security.txt visible
 
-## Qué cambia
-- Reemplacé “Checks extra” por **tarjetas separadas** con métricas y **enlaces**:
-  - **HSTS Preload**: estado + errores + link a hstspreload.
-  - **Email Transport Security**: **MTA-STS** (TXT + policy con mode/mx/max_age) y **TLS-RPT** (rua).
-  - **security.txt**: host, links, campos (Contact/Policy/Expires) + ver contenido.
-  - **Infra (IP/ASN/ISP)**: vía ipwho.is para la primera A IPv4.
-- Mantengo **Observatory (MDN) v2** con POST/GET fallback, **DNS multi-proveedor** (Google/Cloudflare/Quad9/DNS.SB), **RDAP**, logs móviles y **Modo rápido**.
+- **DNS**: se muestran **enlaces directos a MXToolbox** (A, AAAA, NS, MX, SOA, CAA, TXT, DMARC, SPF, DNSSEC).  
+  Si activás el toggle **“Consultar DoH directo”**, intenta DoH (Google/Cloudflare/Quad9/DNS.SB) y muestra lo que consiga. Si tu red bloquea DoH, usá los enlaces.
+- **security.txt**: primero intenta `fetch`. Si CORS bloquea, **embebe** el archivo con `<object>` (se ve el contenido aunque no podamos leerlo). Si el servidor bloquea framing, queda el enlace.
+- **Quitado**: HSTS e Infra, como pediste.
+- Mantiene: **RDAP** y **MDN Observatory v2**, y el panel **Email Transport Security** (MTA-STS / TLS-RPT).
 
-## Deploy
-Subí `index.html`, `styles.css`, `app.js` a GitHub Pages. Si una API bloquea CORS, el panel muestra enlace directo. Si tu red bloquea DoH, alterná con el botón DNS.
-
-## Notas
-- `ipwho.is` es público y soporta CORS; se consulta solo si hay A IPv4.
-- En móvil, `Modo rápido` reduce esperas de extras para mostrar paneles antes.
+Subí `index.html`, `styles.css`, `app.js` a GitHub Pages.

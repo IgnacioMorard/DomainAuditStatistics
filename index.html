@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <meta name="theme-color" content="#11162b" />
-  <title>Auditoría Pública de Dominio (DNS + RDAP + Observatory)</title>
+  <title>Auditoría Pública de Dominio (v3.1)</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <h1>🔍 Auditoría Pública de Dominio</h1>
-    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.9</p>
+    <p class="subtitle">DNS, RDAP, Observatory — v3.1 (sin proxy, con MXToolbox)</p>
   </header>
 
   <main>
@@ -29,9 +29,13 @@
             <input type="checkbox" id="fastMode" />
             <span>Modo rápido</span>
           </label>
+          <label class="switch">
+            <input type="checkbox" id="directDNS" />
+            <span>Consultar DoH directo</span>
+          </label>
         </div>
       </div>
-      <p class="hint">Fuentes públicas (DoH, RDAP, Observatory, etc.). No intrusivo. En móvil, activá “Modo rápido”.</p>
+      <p class="hint">Si tu red bloquea DoH, usá los enlaces de MXToolbox debajo. Esta app no usa proxy.</p>
     </section>
 
     <section class="grid">
@@ -41,8 +45,9 @@
       </div>
 
       <div class="card">
-        <h2>DNS (DoH)</h2>
+        <h2>DNS</h2>
         <div id="dnsResults" class="results"></div>
+        <div id="mxtLinks" class="results"></div>
       </div>
 
       <div class="card">
@@ -56,11 +61,6 @@
       </div>
 
       <div class="card">
-        <h2>HSTS Preload</h2>
-        <div id="hstsResults" class="results"></div>
-      </div>
-
-      <div class="card">
         <h2>Email Transport Security</h2>
         <div id="emailSecResults" class="results"></div>
       </div>
@@ -68,11 +68,6 @@
       <div class="card">
         <h2>security.txt</h2>
         <div id="secTxtResults" class="results"></div>
-      </div>
-
-      <div class="card">
-        <h2>Infra (IP / ASN / ISP)</h2>
-        <div id="infraResults" class="results"></div>
       </div>
     </section>
 
@@ -83,7 +78,7 @@
   </main>
 
   <footer>
-    <p>Fuentes: dns.google, cloudflare-dns.com, dns.quad9.net, doh.dns.sb, rdap.org, hstspreload.org, observatory-api.mdn.mozilla.net, ipwho.is</p>
+    <p>Fuentes: dns.google, cloudflare-dns.com, dns.quad9.net, doh.dns.sb, rdap.org, observatory-api.mdn.mozilla.net, MXToolbox (enlaces)</p>
   </footer>
 
   <script src="app.js"></script>

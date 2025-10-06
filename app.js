@@ -6,14 +6,14 @@ const dnsEl = $("#dnsResults");
 const rdapEl = $("#rdapResults");
 const summaryEl = $("#summary");
 const obsEl = $("#obsResults");
-const hstsEl = $("#hstsResults");
 const emailEl = $("#emailSecResults");
 const secTxtEl = $("#secTxtResults");
-const infraEl = $("#infraResults");
+const mxtLinksEl = $("#mxtLinks");
 const btn = $("#scanBtn");
 const dnsBtn = $("#dnsBtn");
 const input = $("#domain");
 const fastModeEl = $("#fastMode");
+const directDnsEl = $("#directDNS");
 
 let dnsMode = "auto"; // auto (race), google, cloudflare, quad9, dnssb
 
@@ -25,7 +25,7 @@ if (navigator.connection) {
   if (slow) DEFAULT_TIMEOUT = 7000;
 }
 
-// ===== Log robusto (mobile/web): buffer + RAF + fragment append =====
+// ===== Log buffer =====
 const logBuffer = [];
 let rafScheduled = false;
 function flushLog() {
@@ -43,16 +43,13 @@ function flushLog() {
 }
 function log(level, text) {
   logBuffer.push({level, text});
-  if (!rafScheduled) {
-    rafScheduled = true;
-    requestAnimationFrame(flushLog);
-  }
+  if (!rafScheduled) { rafScheduled = true; requestAnimationFrame(flushLog); }
 }
 
 const badge = (txt, type = "info") => `<span class="badge ${type}">${txt}</span>`;
 const safeText = (v) => String(v ?? "").replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]));
 
-// ===== Fetch helpers (AbortController + timeout) =====
+// ===== Fetch helpers =====
 function fetchWithTimeout(url, opts={}, ms=DEFAULT_TIMEOUT) {
   const ctrl = new AbortController();
   const signal = ctrl.signal;
@@ -60,7 +57,7 @@ function fetchWithTimeout(url, opts={}, ms=DEFAULT_TIMEOUT) {
   return fetch(url, { ...opts, signal }).finally(() => clearTimeout(timer));
 }
 
-// ===== DoH providers =====
+// ===== DoH providers (para modo "Consultar DoH directo") =====
 const dohProviders = {
   google: (name, type="A") =>
     fetchWithTimeout(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`,
@@ -82,6 +79,7 @@ const dohProviders = {
       { headers:{ "accept":"application/dns-json" }, mode:"cors", cache:"no-store" })
       .then(r=>{ if(!r.ok) throw new Error(`dns.sb ${type} -> HTTP ${r.status}`); return r.json(); }),
 };
+function parseAnswers(obj) { const ans = obj?.Answer || []; return ans.map(a => ({ name: a.name, type: a.type, data: a.data, TTL: a.TTL })); }
 
 function dohRace(name, type="A", providers=["google","cloudflare","quad9","dnssb"]) {
   const racers = providers.map(p =>
@@ -92,7 +90,6 @@ function dohRace(name, type="A", providers=["google","cloudflare","quad9","dnssb
     for (const p of providers) { return dohProviders[p](name, type).catch(()=>{}); }
   });
 }
-
 async function doh(name, type="A") {
   try {
     if (dnsMode in dohProviders) return await dohProviders[dnsMode](name, type);
@@ -101,22 +98,13 @@ async function doh(name, type="A") {
     for (const p of ["google","cloudflare","quad9","dnssb"]) {
       try { return await dohProviders[p](name, type); } catch(_){}
     }
-    log("WARN", `DoH total fail (${type}): ${e.message}`);
     throw e;
   }
 }
 
-function parseAnswers(obj) {
-  const ans = obj?.Answer || [];
-  return ans.map(a => ({ name: a.name, type: a.type, data: a.data, TTL: a.TTL }));
-}
-
-// ===== RDAP + Extras =====
+// ===== RDAP / Observatory / EmailSec / security.txt =====
 function fetchJson(url) { return fetchWithTimeout(url, {mode:"cors", cache:"no-store"}).then(r=>{ if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }); }
 const rdapDomain = (d) => fetchJson(`https://rdap.org/domain/${encodeURIComponent(d)}`);
-const hstsPreload = (d) => fetchJson(`https://hstspreload.org/api/v2/status?domain=${encodeURIComponent(d)}`);
-
-// Observatory v2 (MDN) con robustez: POST preferente; si falla por CORS/5xx, intento GET
 async function observatoryV2(domain) {
   const url = `https://observatory-api.mdn.mozilla.net/api/v2/scan?host=${encodeURIComponent(domain)}`;
   try {
@@ -124,38 +112,35 @@ async function observatoryV2(domain) {
     if (!r.ok) throw new Error(`Observatory v2 HTTP ${r.status}`);
     return await r.json();
   } catch (e) {
-    log("INFO", `Observatory POST falló (${e.message}). Intento GET (cache)…`);
     try {
       const r2 = await fetchWithTimeout(url, { method: "GET", mode: "cors", cache: "no-store", headers: { "accept": "application/json" } });
       if (!r2.ok) throw new Error(`Observatory v2 GET HTTP ${r2.status}`);
       return await r2.json();
-    } catch (e2) {
-      log("WARN", `Observatory GET falló (${e2.message}). Mostrando enlace al reporte.`);
-      return null;
-    }
+    } catch (e2) { return null; }
   }
 }
-
-// MTA-STS / TLS-RPT / security.txt
 async function fetchText(url) {
   const r = await fetchWithTimeout(url, {mode:"cors", cache:"no-store"});
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.text();
 }
 async function checkMtaSts(domain) {
-  let txt = null;
-  try {
-    const r = await doh(`_mta-sts.${domain}`, "TXT");
-    const ans = parseAnswers(r);
-    txt = ans.map(x=>x.data.replace(/^"|"$/g,"")).join("");
-  } catch(e) {}
-  let policy = null, policyUrl = null;
+  // TXT via DoH si el usuario lo habilita
+  let txt = null, policy = null, policyUrl = null;
+  if (directDnsEl.checked) {
+    try {
+      const r = await doh(`_mta-sts.${domain}`, "TXT");
+      const ans = parseAnswers(r);
+      txt = ans.map(x=>x.data.replace(/^"|"$/g,"")).join("");
+    } catch(e) {}
+  }
   for (const host of [`mta-sts.${domain}`, domain]) {
     try { policyUrl = `https://${host}/.well-known/mta-sts.txt`; policy = await fetchText(policyUrl); break; } catch(_){}
   }
   return { dns: txt, policy, policyUrl };
 }
 async function checkTlsRpt(domain) {
+  if (!directDnsEl.checked) return null;
   try {
     const r = await doh(`_smtp._tls.${domain}`, "TXT");
     const ans = parseAnswers(r);
@@ -164,110 +149,97 @@ async function checkTlsRpt(domain) {
   } catch(e) { return null; }
 }
 async function checkSecurityTxt(domain) {
+  // 1) try fetch (CORS)
   for (const host of [domain, `www.${domain}`]) {
-    try { const url = `https://${host}/.well-known/security.txt`; const t = await fetchText(url); return { host, text: t, url }; }
-    catch(_){}
+    const url = `https://${host}/.well-known/security.txt`;
+    try {
+      const t = await fetchText(url);
+      return { host, text: t, url, rendered: null };
+    } catch(e) {
+      // 2) fallback: <object> embebido (no necesitamos CORS para mostrar)
+      const rendered = `<object data="${url}" type="text/plain" style="width:100%;min-height:160px;border:1px solid var(--border);border-radius:8px;"></object>`;
+      return { host, text: null, url, rendered };
+    }
   }
   return null;
 }
 
-// Infra (ipwho.is) para la primera IPv4 A
-async function fetchInfraFromA(dnsData) {
-  const firstA = dnsData?.A?.find(x => /^\d+\.\d+\.\d+\.\d+$/.test(x.data))?.data;
-  if (!firstA) return null;
-  try {
-    const j = await fetchJson(`https://ipwho.is/${encodeURIComponent(firstA)}`);
-    return { ip: firstA, data: j };
-  } catch(e) { return { ip: firstA, error: e.message }; }
+// ===== DNS (opcional) =====
+async function queryType(domain, type) {
+  try { return parseAnswers(await doh(domain, type)); }
+  catch (_) { return []; }
 }
-
-// ===== DNS checks (paralelos) con fallback por proveedor =====
-async function queryTypeWithFallback(domain, type) {
-  try {
-    return parseAnswers(await doh(domain, type));
-  } catch (_) {
-    for (const p of ["google","cloudflare","quad9","dnssb"]) {
-      try { return parseAnswers(await dohProviders[p](domain, type)); } catch(__){}
-    }
-    return [];
-  }
-}
-
 async function checkDNS(domain) {
-  const results = {};
+  const res = {};
+  if (!directDnsEl.checked) {
+    log("INFO", "Consulta DoH deshabilitada; usá los enlaces de MXToolbox para ver registros.");
+    return res;
+  }
   const types = ["A","AAAA","NS","MX","SOA","CAA","TXT","DS"];
   const tasks = types.map(async (t) => {
-    const data = await queryTypeWithFallback(domain, t);
+    const data = await queryType(domain, t);
     if (data.length) log("OK", `${t}: ${data.map(x=>x.data).join(t==="MX"?" | ":", ")}`);
-    else log("INFO", `${t}: sin datos (posible bloqueo/CORS)`);
+    else log("INFO", `${t}: sin datos (bloqueo/CORS)`);
     return { t, data };
   });
   const settled = await Promise.all(tasks);
-  for (const r of settled) results[r.t] = r.data;
+  for (const r of settled) res[r.t] = r.data;
 
-  const txtVals = (results.TXT||[]).map(x => String(x.data).replace(/^"|"$/g,""));
+  const txtVals = (res.TXT||[]).map(x => String(x.data).replace(/^"|"$/g,""));
   const spf = txtVals.find(v => v.toLowerCase().includes("v=spf1"));
-  if (spf) {
-    results.SPF = spf;
-    log("OK", `SPF: ${spf}`);
-    if (/\+all\b/.test(spf)) log("WARN", "SPF muy permisivo (+all)");
-    if (!/(~all|-all)\b/.test(spf)) log("WARN", "SPF sin política final (~all o -all)");
-  } else {
-    log("WARN", "SPF: no encontrado");
-  }
-
+  if (spf) { res.SPF = spf; }
   try {
-    const d = await queryTypeWithFallback(`_dmarc.${domain}`, "TXT");
-    if (d.length) {
-      const val = d.map(x => x.data.replace(/^"|"$/g, "")).join("");
-      results.DMARC = val;
-      const pol = /;?\s*p=(none|quarantine|reject)\s*;?/i.exec(val)?.[1]?.toLowerCase() || "none?";
-      const rua = /rua=([^;]+)/i.exec(val)?.[1] || "";
-      const pct = /pct=([0-9]{1,3})/i.exec(val)?.[1] || "100";
-      const aspf = /aspf=([rs])/i.exec(val)?.[1] || "?";
-      const adkim = /adkim=([rs])/i.exec(val)?.[1] || "?";
-      log("OK", `DMARC: p=${pol}, pct=${pct}${rua ? `, rua=${rua}` : ""}, aspf=${aspf}, adkim=${adkim}`);
-      if (pol === "none") log("WARN", "DMARC en p=none — considerar quarantine/reject");
-    } else {
-      log("WARN", "DMARC: no encontrado");
-    }
-  } catch (e) { log("INFO", `DMARC: ${e.message}`); }
-
-  const hasDS = (results.DS||[]).length>0;
-  results.DNSSEC = hasDS;
-  log(hasDS ? "OK" : "WARN", hasDS ? "DNSSEC: DS presente" : "DNSSEC: no detectado");
-
-  return results;
+    const d = await queryType(`_dmarc.${domain}`, "TXT");
+    if (d.length) res.DMARC = d.map(x => x.data.replace(/^"|"$/g, "")).join("");
+  } catch(_){}
+  res.DNSSEC = (res.DS||[]).length>0;
+  return res;
 }
 
-// ===== Render helpers =====
+// ===== Render =====
 function list(items) { return `<ul>${items.map(i => `<li>${i}</li>`).join("")}</ul>`; }
-
 function renderDNS(domain, data) {
-  const rows = [];
   const joinData = (arr) => arr?.map(x => safeText(x.data)).join("<br>") || "—";
+  if (Object.keys(data).length===0) {
+    dnsEl.innerHTML = `<p>${badge("DoH deshabilitado", "info")} Activá “Consultar DoH directo” o usá los enlaces de MXToolbox de abajo.</p>`;
+  } else {
+    dnsEl.innerHTML = `
+      <h3>${safeText(domain)}</h3>
+      <p>${
+        [
+          data.DNSSEC ? "DNSSEC (detectado)" : "DNSSEC (no detectado)",
+          data.CAA?.length ? "CAA presente" : "CAA ausente",
+          data.SPF ? "SPF" : "SPF ausente",
+          data.DMARC ? "DMARC" : "DMARC ausente"
+        ].map(t => badge(t, /no|ausente/i.test(t) ? "warn" : "ok")).join(" ")
+      }</p>
+      <h4>Registros</h4>
+      <div><strong>A</strong><br><code>${joinData(data.A)}</code></div>
+      <div><strong>AAAA</strong><br><code>${joinData(data.AAAA)}</code></div>
+      <div><strong>NS</strong><br><code>${joinData(data.NS)}</code></div>
+      <div><strong>MX</strong><br><code>${joinData(data.MX)}</code></div>
+      <div><strong>SOA</strong><br><code>${joinData(data.SOA)}</code></div>
+      <div><strong>CAA</strong><br><code>${joinData(data.CAA)}</code></div>
+      <div><strong>TXT</strong><br><code>${joinData(data.TXT)}</code></div>
+    `;
+  }
 
-  rows.push(`<h3>${safeText(domain)}</h3>`);
-  rows.push(`<p>${
-    [
-      data.DNSSEC ? "DNSSEC (detectado)" : "DNSSEC (no detectado)",
-      data.CAA?.length ? "CAA presente" : "CAA ausente",
-      data.SPF ? "SPF" : "SPF ausente",
-      data.DMARC ? "DMARC" : "DMARC ausente"
-    ].map(t => badge(t, /no|ausente/i.test(t) ? "warn" : "ok")).join(" ")
-  }</p>`);
-
-  rows.push(`<h4>Registros</h4>
-    <div><strong>A</strong><br><code>${joinData(data.A)}</code></div>
-    <div><strong>AAAA</strong><br><code>${joinData(data.AAAA)}</code></div>
-    <div><strong>NS</strong><br><code>${joinData(data.NS)}</code></div>
-    <div><strong>MX</strong><br><code>${joinData(data.MX)}</code></div>
-    <div><strong>SOA</strong><br><code>${joinData(data.SOA)}</code></div>
-    <div><strong>CAA</strong><br><code>${joinData(data.CAA)}</code></div>
-    <div><strong>TXT</strong><br><code>${joinData(data.TXT)}</code></div>
-  `);
-
-  dnsEl.innerHTML = rows.join("\n");
+  // Enlaces MXToolbox
+  const enc = encodeURIComponent(domain);
+  const links = [
+    ["A", `https://mxtoolbox.com/SuperTool.aspx?action=a%3a${enc}&run=toolpage`],
+    ["AAAA", `https://mxtoolbox.com/SuperTool.aspx?action=aaaa%3a${enc}&run=toolpage`],
+    ["NS", `https://mxtoolbox.com/SuperTool.aspx?action=ns%3a${enc}&run=toolpage`],
+    ["MX", `https://mxtoolbox.com/SuperTool.aspx?action=mx%3a${enc}&run=toolpage`],
+    ["SOA", `https://mxtoolbox.com/SuperTool.aspx?action=soa%3a${enc}&run=toolpage`],
+    ["CAA", `https://mxtoolbox.com/SuperTool.aspx?action=caa%3a${enc}&run=toolpage`],
+    ["TXT", `https://mxtoolbox.com/SuperTool.aspx?action=txt%3a${enc}&run=toolpage`],
+    ["DMARC", `https://mxtoolbox.com/SuperTool.aspx?action=dmarc%3a${enc}&run=toolpage`],
+    ["SPF", `https://mxtoolbox.com/SuperTool.aspx?action=spf%3a${enc}&run=toolpage`],
+    ["DNSSEC", `https://mxtoolbox.com/SuperTool.aspx?action=dnssec%3a${enc}&run=toolpage`],
+  ];
+  mxtLinksEl.innerHTML = `<h4>Abrir en MXToolbox</h4>
+    <ul>${links.map(([k,u])=>`<li><a target="_blank" rel="noreferrer" href="${u}">${k}</a></li>`).join("")}</ul>`;
 }
 
 function renderRDAP(domain, rdap) {
@@ -299,7 +271,7 @@ function renderRDAP(domain, rdap) {
 
 function renderObservatory(domain, obs) {
   if (!obs) {
-    obsEl.innerHTML = `<p>${badge("Observatory no disponible (CORS/limits)", "info")} <a target="_blank" rel="noreferrer" href="https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}">Abrir reporte</a></p>`;
+    obsEl.innerHTML = `<p>${badge("Observatory no disponible (CORS/limits)", "info")} <a target="_blank" rel="noreferrer" href="https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}">Ver reporte</a></p>`;
     return;
   }
   const rows = [];
@@ -311,34 +283,16 @@ function renderObservatory(domain, obs) {
   const algo = obs.algorithm_version ?? "?";
   const scannedAt = obs.scanned_at ? new Date(obs.scanned_at).toLocaleString() : "—";
   const details = obs.details_url || `https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}`;
-
   const type = score >= 90 ? "ok" : (score >= 60 ? "warn" : "err");
   rows.push(`<div><strong>Grade:</strong> ${badge(grade, type)} &nbsp; <strong>Score:</strong> ${badge(String(score), type)}</div>`);
   rows.push(`<div><strong>Tests:</strong> ${tp}/${tq} pasados, ${tf} fallidos</div>`);
   rows.push(`<div><strong>Algoritmo:</strong> v${safeText(String(algo))} &nbsp; <strong>Escaneado:</strong> ${safeText(scannedAt)}</div>`);
-  rows.push(`<div><a target="_blank" rel="noreferrer" href="${safeText(details)}">Ver reporte completo en MDN</a></div>`);
+  rows.push(`<div><a target="_blank" rel="noreferrer" href="${safeText(details)}">Reporte completo MDN</a></div>`);
   obsEl.innerHTML = rows.join("\n");
-}
-
-function renderHSTS(domain, hsts) {
-  if (!hsts) {
-    hstsEl.innerHTML = `<p>${badge("No disponible", "info")} <a target="_blank" rel="noreferrer" href="https://hstspreload.org/?domain=${encodeURIComponent(domain)}">Abrir HSTS Preload</a></p>`;
-    return;
-  }
-  const st = safeText(hsts.status || "unknown");
-  const type = st==="preloaded" ? "ok" : (st==="unknown" ? "info" : "warn");
-  const rows = [];
-  rows.push(`<div><strong>Estado:</strong> ${badge(st, type)}</div>`);
-  if (Array.isArray(hsts.errors) && hsts.errors.length) {
-    rows.push(`<details><summary>Errores</summary><code>${safeText(hsts.errors.join("\\n"))}</code></details>`);
-  }
-  rows.push(`<div><a target="_blank" rel="noreferrer" href="https://hstspreload.org/?domain=${encodeURIComponent(domain)}">Ver detalle</a></div>`);
-  hstsEl.innerHTML = rows.join("\n");
 }
 
 function renderEmailSec(domain, mta, tlsrpt) {
   const rows = [];
-  // MTA-STS
   const mtaTxt = mta?.dns ? badge("TXT", "ok") : badge("TXT ausente", "warn");
   const mtaPol = mta?.policy ? badge("policy", "ok") : badge("policy ausente", "warn");
   rows.push(`<div><strong>MTA-STS:</strong> ${mtaTxt} ${mtaPol}${mta?.policyUrl?` — <a target="_blank" rel="noreferrer" href="${safeText(mta.policyUrl)}">ver policy</a>`:""}</div>`);
@@ -348,7 +302,6 @@ function renderEmailSec(domain, mta, tlsrpt) {
     const maxAge = /max_age\s*:\s*(\d+)/i.exec(mta.policy)?.[1] || "?";
     rows.push(`<div>Modo: <code>${safeText(mode)}</code> · MX: <code>${safeText(mx)}</code> · max_age: <code>${safeText(maxAge)}</code></div>`);
   }
-  // TLS-RPT
   if (tlsrpt) {
     const rua = /rua=mailto:([^;]+)/i.exec(tlsrpt)?.[1] || "?";
     rows.push(`<div><strong>TLS-RPT:</strong> ${badge("TXT", "ok")} · Reportes a: <code>${safeText(rua)}</code></div>`);
@@ -360,57 +313,41 @@ function renderEmailSec(domain, mta, tlsrpt) {
 
 function renderSecurityTxt(domain, sec) {
   if (!sec) {
-    secTxtEl.innerHTML = `<p>${badge("No encontrado", "info")} <a target="_blank" rel="noreferrer" href="https://${safeText(domain)}/.well-known/security.txt">probar</a></p>`;
+    secTxtEl.innerHTML = `<p>${badge("No encontrado", "info")} <a target="_blank" rel="noreferrer" href="https://${safeText(domain)}/.well-known/security.txt">abrir</a></p>`;
     return;
   }
   const rows = [];
   rows.push(`<div>Host: <code>${safeText(sec.host)}</code> — <a target="_blank" rel="noreferrer" href="${safeText(sec.url)}">ver archivo</a></div>`);
-  // parse campos interesantes (Contact, Expires, Policy, Acknowledgments)
-  const contact = (sec.text.match(/^Contact:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
-  const policy = (sec.text.match(/^Policy:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
-  const expires = (sec.text.match(/^Expires:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
-  if (contact.length) rows.push(`<div>Contact: ${contact.map(x=>`<code>${safeText(x)}</code>`).join(", ")}</div>`);
-  if (policy.length) rows.push(`<div>Policy: ${policy.map(x=>`<a target="_blank" rel="noreferrer" href="${safeText(x)}">link</a>`).join(", ")}</div>`);
-  if (expires.length) rows.push(`<div>Expires: ${expires.map(x=>`<code>${safeText(x)}</code>`).join(", ")}</div>`);
-  secTxtEl.innerHTML = rows.join("\n") + `<details style="margin-top:8px;"><summary>Ver contenido</summary><code>${safeText(sec.text)}</code></details>`;
+  if (sec.text) {
+    const contact = (sec.text.match(/^Contact:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
+    const policy = (sec.text.match(/^Policy:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
+    const expires = (sec.text.match(/^Expires:\s*(.+)$/gmi)||[]).map(x=>x.split(":").slice(1).join(":").trim());
+    if (contact.length) rows.push(`<div>Contact: ${contact.map(x=>`<code>${safeText(x)}</code>`).join(", ")}</div>`);
+    if (policy.length) rows.push(`<div>Policy: ${policy.map(x=>`<a target="_blank" rel="noreferrer" href="${safeText(x)}">link</a>`).join(", ")}</div>`);
+    if (expires.length) rows.push(`<div>Expires: ${expires.map(x=>`<code>${safeText(x)}</code>`).join(", ")}</div>`);
+    rows.push(`<details style="margin-top:8px;"><summary>Ver contenido</summary><code>${safeText(sec.text)}</code></details>`);
+  } else if (sec.rendered) {
+    rows.push(`<div>${badge("CORS bloquea la lectura — vista embebida", "info")}</div>`);
+    rows.push(sec.rendered);
+  }
+  secTxtEl.innerHTML = rows.join("\n");
 }
 
-function renderInfra(domain, infra) {
-  if (!infra) {
-    infraEl.innerHTML = `<p>${badge("Sin datos (no hay A IPv4)", "info")}</p>`;
-    return;
-  }
-  if (infra.error) {
-    infraEl.innerHTML = `<p>${badge("No disponible", "info")} (ipwho.is) · IP: <code>${safeText(infra.ip)}</code></p>`;
-    return;
-  }
-  const j = infra.data || {};
-  const rows = [];
-  rows.push(`<div>IP: <code>${safeText(infra.ip)}</code> · País: <code>${safeText(j.country || "?")}</code> · Ciudad: <code>${safeText(j.city || "?")}</code></div>`);
-  rows.push(`<div>ASN: <code>${safeText(j.connection?.asn || "?")}</code> · Org: <code>${safeText(j.connection?.org || "?")}</code> · ISP: <code>${safeText(j.connection?.isp || "?")}</code></div>`);
-  rows.push(`<div><a target="_blank" rel="noreferrer" href="https://ipwho.is/${encodeURIComponent(infra.ip)}">Ver detalle ipwho.is</a></div>`);
-  infraEl.innerHTML = rows.join("\n");
-}
-
-function summarize(domain, dnsData, rdapOk, obs, hsts, mta, tlsrpt, sec) {
+function summarize(domain, dnsData, rdapOk, obs, mta, tlsrpt, sec) {
   const items = [];
   if (dnsData.DNSSEC) items.push("✅ DNSSEC detectado"); else items.push("⚠️ DNSSEC no detectado");
   if (dnsData.CAA?.length) items.push("✅ CAA presente"); else items.push("⚠️ CAA ausente (recomendado)");
   if (dnsData.SPF) items.push("✅ SPF presente"); else items.push("⚠️ SPF ausente");
-  if (dnsData.DMARC) {
-    const pol = /p=(none|quarantine|reject)/i.exec(dnsData.DMARC)?.[1] || "none?";
-    items.push(`✅ DMARC presente (p=${pol})${pol.toLowerCase()==="none"?" ⚠️ considerar quarantine/reject":""}`);
-  } else items.push("⚠️ DMARC ausente");
-  if (hsts?.status) items.push(`🌐 HSTS preload: ${hsts.status}`);
+  if (dnsData.DMARC) items.push("✅ DMARC presente"); else items.push("⚠️ DMARC ausente");
+  if (!rdapOk) items.push("ℹ️ RDAP no disponible (CORS).");
   if (mta?.policy || mta?.dns) items.push("✉️ MTA-STS presente");
   if (tlsrpt) items.push("📊 TLS-RPT presente");
-  if (sec) items.push("🛡️ security.txt presente");
-  if (!rdapOk) items.push("ℹ️ RDAP no disponible por CORS (link manual).");
+  if (sec) items.push("🛡️ security.txt accesible");
   if (obs?.grade) items.push(`🧪 Observatory: ${obs.grade} (${obs.score})`);
   summaryEl.innerHTML = list(items);
 }
 
-// ===== Controlador principal (progresivo + rápido) =====
+// ===== Controlador principal =====
 async function runScan() {
   const domain = input.value.trim().toLowerCase();
   if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) {
@@ -420,56 +357,38 @@ async function runScan() {
 
   btn.disabled = true; dnsBtn.disabled = true; fastModeEl.disabled = false;
   logEl.textContent = ""; dnsEl.innerHTML = ""; rdapEl.innerHTML = ""; summaryEl.innerHTML = "";
-  obsEl.innerHTML = ""; hstsEl.innerHTML = ""; emailEl.innerHTML = ""; secTxtEl.innerHTML = ""; infraEl.innerHTML = "";
-  log("INFO", `Iniciando auditoría para ${domain} (DNS ${dnsMode}, timeout ${DEFAULT_TIMEOUT}ms, modo ${fastModeEl.checked?"rápido":"completo"})`);
+  obsEl.innerHTML = ""; emailEl.innerHTML = ""; secTxtEl.innerHTML = ""; mxtLinksEl.innerHTML = "";
+  log("INFO", `Auditoría para ${domain} — DoH ${directDnsEl.checked?"ON":"OFF"} (DNS ${dnsMode})`);
 
   try {
-    // 1) DNS
     const dnsData = await checkDNS(domain);
     renderDNS(domain, dnsData);
 
-    // 2) Infra (depende de A)
-    const infraTask = fetchInfraFromA(dnsData).then(x=>{ renderInfra(domain, x); return x; });
-
-    // 3) RDAP
     let rdapJson = null;
-    const rdapTask = rdapDomain(domain).then(j=>{rdapJson=j; log("OK","RDAP obtenido");}).catch(e=>log("INFO",`RDAP no disponible — ${e.message}`));
+    const rdapTask = rdapDomain(domain).then(j=>{rdapJson=j;}).catch(_=>{});
 
-    // 4) Observatory
-    const obsTask = observatoryV2(domain).then(j=>{ if(j){ log("OK", `Observatory: ${j.grade} (${j.score})`);} renderObservatory(domain, j); return j; })
-      .catch(e=>{ log("INFO", `Observatory v2 ND — ${e.message}`); renderObservatory(domain, null); return null; });
+    const obsTask = observatoryV2(domain).then(j=>{ renderObservatory(domain, j); return j; }).catch(_=>null);
 
-    // 5) HSTS / EmailSec / security.txt
-    const hstsTask = hstsPreload(domain).then(j=>{ renderHSTS(domain, j); return j; }).catch(_=>{ renderHSTS(domain, null); return null; });
-    const mtaTask = checkMtaSts(domain).then(j=>{ return j; }).catch(_=>null);
-    const tlsTask = checkTlsRpt(domain).then(j=>{ return j; }).catch(_=>null);
+    const mtaTask = checkMtaSts(domain).catch(_=>null);
+    const tlsTask = checkTlsRpt(domain).catch(_=>null);
     const secTask = checkSecurityTxt(domain).then(j=>{ renderSecurityTxt(domain, j); return j; }).catch(_=>{ renderSecurityTxt(domain, null); return null; });
 
-    let obsResult, hstsResult, mtaResult, tlsResult, secResult;
+    let obsResult = null, mtaResult = null, tlsResult = null, secResult = null;
     if (fastModeEl.checked) {
-      // Mostrar rápido Observatory y HSTS si llegan, sin bloquear
       [obsResult] = await Promise.race([Promise.all([obsTask]), new Promise(res=>setTimeout(()=>res([null]), 2500))]);
-      [hstsResult] = await Promise.race([Promise.all([hstsTask]), new Promise(res=>setTimeout(()=>res([null]), 2000))]);
       [mtaResult, tlsResult, secResult] = await Promise.race([
         Promise.all([mtaTask, tlsTask, secTask]), new Promise(res=>setTimeout(()=>res([null,null,null]), 2500))
       ]);
     } else {
       obsResult = await obsTask;
-      hstsResult = await hstsTask;
-      mtaResult = await mtaTask;
-      tlsResult = await tlsTask;
-      secResult = await secTask;
+      [mtaResult, tlsResult, secResult] = await Promise.all([mtaTask, tlsTask, secTask]);
     }
-    renderEmailSec(domain, mtaResult, tlsResult);
 
     await rdapTask;
     renderRDAP(domain, rdapJson);
+    renderEmailSec(domain, mtaResult, tlsResult);
 
-    const infraResult = await infraTask;
-
-    summarize(domain, dnsData, !!rdapJson, obsResult, hstsResult, mtaResult, tlsResult, secResult);
-
-    log("INFO", "Listo. Fuentes: DoH (Google/Cloudflare/Quad9/DNS.SB), RDAP, Observatory v2, HSTS preload, MTA-STS/TLS-RPT, security.txt, ipwho.is.");
+    summarize(domain, dnsData, !!rdapJson, obsResult, mtaResult, tlsResult, secResult);
   } catch (e) {
     log("ERROR", e.message || String(e));
   } finally {
@@ -479,7 +398,6 @@ async function runScan() {
 
 btn.addEventListener("click", runScan);
 input.addEventListener("keydown", (e) => { if (e.key === "Enter") runScan(); });
-
 dnsBtn.addEventListener("click", () => {
   const order = ["auto","google","cloudflare","quad9","dnssb"];
   const i = order.indexOf(dnsMode);
