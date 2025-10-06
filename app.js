@@ -18,12 +18,26 @@ const badge = (txt, type = "info") => `<span class="badge ${type}">${txt}</span>
 
 const safeText = (v) => String(v ?? "").replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]));
 
-// ===== DNS over HTTPS con dns.google =====
-async function doh(name, type = "A") {
+// ===== DNS over HTTPS: Google -> fallback Cloudflare =====
+async function dohGoogle(name, type = "A") {
   const url = `https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`;
-  const res = await fetch(url, { headers: { "accept": "application/dns-json" } });
-  if (!res.ok) throw new Error(`DoH ${type} ${name} -> HTTP ${res.status}`);
+  const res = await fetch(url, { headers: { "accept": "application/dns-json" }, mode: "cors", cache: "no-store" });
+  if (!res.ok) throw new Error(`dns.google ${type} -> HTTP ${res.status}`);
   return res.json();
+}
+async function dohCloudflare(name, type = "A") {
+  const url = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}&ct=application/dns-json`;
+  const res = await fetch(url, { headers: { "accept": "application/dns-json" }, mode: "cors", cache: "no-store" });
+  if (!res.ok) throw new Error(`cloudflare-dns ${type} -> HTTP ${res.status}`);
+  return res.json();
+}
+async function doh(name, type = "A") {
+  try {
+    return await dohGoogle(name, type);
+  } catch (e1) {
+    log("INFO", `Fallo dns.google (${type}): ${e1.message} — usando fallback Cloudflare`);
+    return await dohCloudflare(name, type);
+  }
 }
 
 function parseAnswers(obj) {
@@ -31,10 +45,10 @@ function parseAnswers(obj) {
   return ans.map(a => ({ name: a.name, type: a.type, data: a.data, TTL: a.TTL }));
 }
 
-// ===== RDAP via rdap.org (cae a link si CORS falla) =====
+// ===== RDAP via rdap.org (si CORS falla, mostramos link) =====
 async function rdapDomain(domain) {
   const url = `https://rdap.org/domain/${encodeURIComponent(domain)}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { mode: "cors", cache: "no-store" });
   if (!res.ok) throw new Error(`RDAP HTTP ${res.status}`);
   return res.json();
 }
@@ -43,24 +57,19 @@ function extractRdapSummary(rdap) {
   const out = {};
   try {
     out.ldhName = rdap.ldhName || rdap.handle || null;
-    // Registrar (entity con rol registrar)
     const registrar = (rdap.entities || []).find(e => (e.roles||[]).includes("registrar"));
     out.registrar = registrar?.vcardArray?.[1]?.find(x => x[0] === "fn")?.[3] || registrar?.handle || null;
-    // Fechas
     const ev = {};
-    for (const e of (rdap.events || [])) {
-      ev[e.eventAction] = e.eventDate;
-    }
+    for (const e of (rdap.events || [])) ev[e.eventAction] = e.eventDate;
     out.registered = ev.registration || ev.registered || null;
     out.expires = ev.expiration || ev.expire || null;
     out.updated = ev.lastchanged || ev.lastupdate || ev.lastchangeddate || null;
-    // Nameservers
     out.nameservers = (rdap.nameservers || []).map(ns => ns.ldhName || ns.handle).filter(Boolean);
   } catch {}
   return out;
 }
 
-// ===== Chequeos de seguridad DNS =====
+// ===== Chequeos DNS =====
 async function checkDNS(domain) {
   const results = {};
   // A / AAAA
@@ -96,7 +105,7 @@ async function checkDNS(domain) {
     log("OK", `SOA: ${results.SOA[0]?.data || "—"}`);
   } catch (e) { log("INFO", `SOA: ${e.message}`); }
 
-  // CAA (257)
+  // CAA
   try {
     const caa = await doh(domain, "CAA");
     results.CAA = parseAnswers(caa);
@@ -185,7 +194,7 @@ function renderDNS(domain, data) {
 
 function renderRDAP(domain, rdap) {
   if (!rdap) {
-    rdapEl.innerHTML = `<p>${badge("No disponible por CORS — abrí RDAP manualmente", "warn")} <a href="https://rdap.org/domain/${encodeURIComponent(domain)}" target="_blank" rel="noreferrer">Ver RDAP</a></p>`;
+    rdapEl.innerHTML = `<p>${badge("RDAP no disponible (CORS) — abrir manualmente", "warn")} <a href="https://rdap.org/domain/${encodeURIComponent(domain)}" target="_blank" rel="noreferrer">Ver RDAP</a></p>`;
     return;
   }
   const s = extractRdapSummary(rdap);
@@ -216,7 +225,7 @@ function summarize(domain, dnsData, rdapSummaryOk) {
     items.push(`✅ DMARC presente (p=${pol})${pol.toLowerCase()==="none" ? " ⚠️ considerar quarantine/reject" : ""}`);
   } else items.push("⚠️ DMARC ausente");
 
-  if (!rdapSummaryOk) items.push("ℹ️ RDAP no disponible por CORS (link manual en la tarjeta RDAP).");
+  if (!rdapSummaryOk) items.push("ℹ️ RDAP no disponible por CORS (link manual).");
 
   summaryEl.innerHTML = list(items);
 }
@@ -245,13 +254,13 @@ async function runScan() {
       rdapJson = await rdapDomain(domain);
       log("OK", "RDAP obtenido");
     } catch (e) {
-      log("WARN", `RDAP no disponible por CORS/HTTP — ${e.message}`);
+      log("WARN", `RDAP no disponible — ${e.message}`);
     }
     renderRDAP(domain, rdapJson);
 
     summarize(domain, dnsData, !!rdapJson);
 
-    log("INFO", "Listo ✅ Solo se consultaron fuentes públicas (DoH + RDAP).");
+    log("INFO", "Listo. Solo se consultaron fuentes públicas (DoH + RDAP).");
   } catch (e) {
     log("ERROR", e.message || String(e));
   } finally {

@@ -2,7 +2,7 @@
 
 Sitio estático (HTML/JS/CSS) listo para GitHub Pages que consulta **parámetros públicos** de un dominio:
 
-- DNS sobre HTTPS (dns.google): A, AAAA, NS, MX, SOA, TXT (SPF), CAA, DS (DNSSEC), DMARC (`_dmarc`)
+- DNS sobre HTTPS (dns.google + fallback Cloudflare): A, AAAA, NS, MX, SOA, TXT (SPF), CAA, DS (DNSSEC), DMARC (`_dmarc`)
 - RDAP (whois moderno) vía rdap.org (si el endpoint permite CORS en tu navegador; si no, se muestra link para abrir manualmente)
 
 **No** hace port scanning ni requests intrusivos. Es ideal para un portfolio o check rápido de configuración.
@@ -22,12 +22,8 @@ python -m http.server 8080
 ```
 
 ## Notas técnicas
-- DNS via DoH: `https://dns.google/resolve?name=<dominio>&type=<TYPE>` (CORS friendly).
+- DNS via DoH: Primario `https://dns.google/resolve`, fallback `https://cloudflare-dns.com/dns-query?ct=application/dns-json`.
 - RDAP: `https://rdap.org/domain/<dominio>` (si CORS del registry lo permite; si no, ver enlace en la sección RDAP de la app).
 - DMARC: consultando `TXT` en `_dmarc.<dominio>` y parseando `p=` (`none|quarantine|reject`).
 - CAA: restringe emisores de certificados. Recomendado añadir.
 - DNSSEC: detección via existencia de `DS` y/o `AD=true` en la respuesta.
-
----
-
-Hecho para uso educativo. Escanea solo parámetros públicos.
