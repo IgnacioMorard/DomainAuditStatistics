@@ -6,6 +6,7 @@ const dnsEl = $("#dnsResults");
 const rdapEl = $("#rdapResults");
 const summaryEl = $("#summary");
 const extraEl = $("#extraResults");
+const obsEl = $("#obsResults");
 const btn = $("#scanBtn");
 const dnsBtn = $("#dnsBtn");
 const input = $("#domain");
@@ -81,13 +82,11 @@ function dohCloudflare(name, type="A") {
 function dohRace(name, type="A") {
   const p1 = dohGoogle(name, type);
   const p2 = dohCloudflare(name, type);
-  // Promise.any no está en algunos navegadores antiguos; usamos una emulación simple
   return Promise.race([
     p1.then(v=>({ok:true,v})).catch(e=>({ok:false,e})),
     p2.then(v=>({ok:true,v})).catch(e=>({ok:false,e}))
   ]).then(first => {
     if (first.ok) return first.v;
-    // si el "race" devolvió la rama fallida (muy raro), intentamos la otra de manera normal
     return dohGoogle(name, type).catch(()=>dohCloudflare(name, type));
   });
 }
@@ -96,17 +95,11 @@ async function doh(name, type="A") {
   try {
     if (dnsMode === "google") return await dohGoogle(name, type);
     if (dnsMode === "cloudflare") return await dohCloudflare(name, type);
-    // auto: race
     return await dohRace(name, type);
   } catch (e) {
     log("INFO", `DoH fallo (${type}): ${e.message}`);
-    // fallback inverso si el race falló totalmente
-    try {
-      return await dohCloudflare(name, type);
-    } catch (e2) {
-      log("WARN", `DoH fallback también falló: ${e2.message}`);
-      throw e;
-    }
+    try { return await dohCloudflare(name, type); }
+    catch (e2) { log("WARN", `DoH fallback también falló: ${e2.message}`); throw e; }
   }
 }
 
@@ -119,11 +112,19 @@ function parseAnswers(obj) {
 function fetchJson(url) { return fetchWithTimeout(url, {mode:"cors", cache:"no-store"}).then(r=>{ if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }); }
 const rdapDomain = (d) => fetchJson(`https://rdap.org/domain/${encodeURIComponent(d)}`);
 const hstsPreload = (d) => fetchJson(`https://hstspreload.org/api/v2/status?domain=${encodeURIComponent(d)}`);
-async function mozillaObservatory(d) {
-  const analyze = `https://http-observatory.security.mozilla.org/api/v1/analyze?host=${encodeURIComponent(d)}&rescan=false`;
-  const get = `https://http-observatory.security.mozilla.org/api/v1/getHost?host=${encodeURIComponent(d)}`;
-  try { await fetchWithTimeout(analyze, {mode:"cors", cache:"no-store"}); } catch(_){}
-  return fetchJson(get);
+
+// Observatory v2 (MDN): POST /api/v2/scan?host=domain
+async function observatoryV2(domain) {
+  const url = `https://observatory-api.mdn.mozilla.net/api/v2/scan?host=${encodeURIComponent(domain)}`;
+  const r = await fetchWithTimeout(url, {
+    method: "POST",
+    mode: "cors",
+    cache: "no-store",
+    headers: { "accept": "application/json" }
+  }, DEFAULT_TIMEOUT);
+  if (!r.ok) throw new Error(`Observatory v2 HTTP ${r.status}`);
+  const j = await r.json();
+  return j; // { id, details_url, algorithm_version, scanned_at, grade, score, tests_* }
 }
 
 // MTA-STS / TLS-RPT / security.txt
@@ -133,20 +134,15 @@ async function fetchText(url) {
   return r.text();
 }
 async function checkMtaSts(domain) {
-  // DNS TXT _mta-sts
   let txt = null;
   try {
     const r = await doh(`_mta-sts.${domain}`, "TXT");
     const ans = parseAnswers(r);
     txt = ans.map(x=>x.data.replace(/^"|"$/g,"")).join("");
   } catch(e) {}
-  // Política HTTPS
   let policy = null;
   for (const host of [`mta-sts.${domain}`, domain]) {
-    try {
-      policy = await fetchText(`https://${host}/.well-known/mta-sts.txt`);
-      break;
-    } catch(_){}
+    try { policy = await fetchText(`https://${host}/.well-known/mta-sts.txt`); break; } catch(_){}
   }
   return { dns: txt, policy };
 }
@@ -160,10 +156,8 @@ async function checkTlsRpt(domain) {
 }
 async function checkSecurityTxt(domain) {
   for (const host of [domain, `www.${domain}`]) {
-    try {
-      const t = await fetchText(`https://${host}/.well-known/security.txt`);
-      return { host, text: t };
-    } catch(_){}
+    try { const t = await fetchText(`https://${host}/.well-known/security.txt`); return { host, text: t }; }
+    catch(_){}
   }
   return null;
 }
@@ -171,7 +165,6 @@ async function checkSecurityTxt(domain) {
 // ===== DNS checks (paralelos) =====
 async function checkDNS(domain) {
   const results = {};
-  // Conjunto de tipos principales (corren en paralelo)
   const types = ["A","AAAA","NS","MX","SOA","CAA","TXT","DS"];
   const tasks = types.map(t => doh(domain, t).then(json => ({t, data: parseAnswers(json)})).catch(e => ({t, error: e.message})));
   const settled = await Promise.all(tasks);
@@ -183,7 +176,7 @@ async function checkDNS(domain) {
     log("OK", `${r.t}: ${joined || "—"}`);
   }
 
-  // Derivados de TXT: SPF
+  // TXT → SPF
   const txtVals = (results.TXT||[]).map(x => String(x.data).replace(/^"|"$/g,""));
   const spf = txtVals.find(v => v.toLowerCase().includes("v=spf1"));
   if (spf) {
@@ -223,9 +216,7 @@ async function checkDNS(domain) {
 }
 
 // ===== Render helpers =====
-function list(items) {
-  return `<ul>${items.map(i => `<li>${i}</li>`).join("")}</ul>`;
-}
+function list(items) { return `<ul>${items.map(i => `<li>${i}</li>`).join("")}</ul>`; }
 
 function renderDNS(domain, data) {
   const rows = [];
@@ -281,39 +272,51 @@ function renderRDAP(domain, rdap) {
   rdapEl.innerHTML = rows.join("\n") + `<details style="margin-top:8px;"><summary>Ver JSON RDAP</summary><code>${safeText(JSON.stringify(rdap, null, 2))}</code></details>`;
 }
 
-function renderExtra(domain, dnsData, hsts, observ, mta, tlsrpt, secTxt) {
+function renderObservatory(domain, obs) {
+  if (!obs) {
+    obsEl.innerHTML = `<p>${badge("Observatory no disponible (CORS o error temporal)", "info")} <a target="_blank" rel="noreferrer" href="https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}">Abrir reporte</a></p>`;
+    return;
+  }
   const rows = [];
-  // HSTS preload
+  const grade = safeText(obs.grade || "?");
+  const score = typeof obs.score === "number" ? obs.score : "?";
+  const tf = obs.tests_failed ?? "?";
+  const tp = obs.tests_passed ?? "?";
+  const tq = obs.tests_quantity ?? "?";
+  const algo = obs.algorithm_version ?? "?";
+  const scannedAt = obs.scanned_at ? new Date(obs.scanned_at).toLocaleString() : "—";
+  const details = obs.details_url || `https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}`;
+
+  const type = score >= 90 ? "ok" : (score >= 60 ? "warn" : "err");
+  rows.push(`<div><strong>Grade:</strong> ${badge(grade, type)} &nbsp; <strong>Score:</strong> ${badge(String(score), type)}</div>`);
+  rows.push(`<div><strong>Tests:</strong> ${tp}/${tq} pasados, ${tf} fallidos</div>`);
+  rows.push(`<div><strong>Algoritmo:</strong> v${safeText(String(algo))} &nbsp; <strong>Escaneado:</strong> ${safeText(scannedAt)}</div>`);
+  rows.push(`<div><a target="_blank" rel="noreferrer" href="${safeText(details)}">Ver reporte completo en MDN</a></div>`);
+  obsEl.innerHTML = rows.join("\n");
+}
+
+function renderExtra(domain, dnsData, hsts, mta, tlsrpt, secTxt) {
+  const rows = [];
   if (hsts) {
     const st = safeText(hsts.status || "unknown");
     rows.push(`<div><strong>HSTS Preload:</strong> ${badge(st, st==="preloaded"?"ok":(st==="unknown"?"info":"warn"))}</div>`);
   } else {
     rows.push(`<div>${badge("HSTS preload no disponible", "info")} <a target="_blank" rel="noreferrer" href="https://hstspreload.org/">Ver sitio</a></div>`);
   }
-  // Observatory
-  if (observ && observ?.scores) {
-    rows.push(`<div><strong>Mozilla Observatory:</strong> Score ${safeText(String(observ.scores?.overall || "?"))} — <a target="_blank" rel="noreferrer" href="https://observatory.mozilla.org/analyze/${encodeURIComponent(domain)}">detalle</a></div>`);
-  } else {
-    rows.push(`<div>${badge("Observatory no disponible", "info")} <a target="_blank" rel="noreferrer" href="https://observatory.mozilla.org/analyze/${encodeURIComponent(domain)}">Abrir</a></div>`);
-  }
-  // MTA-STS
   if (mta?.dns || mta?.policy) {
     rows.push(`<div><strong>MTA-STS:</strong> ${mta.dns?badge("TXT","ok"):badge("TXT ausente","warn")} ${mta.policy?badge("policy","ok"):badge("policy ausente","warn")}</div>`);
     if (mta.policy) rows.push(`<details><summary>Ver política</summary><code>${safeText(mta.policy)}</code></details>`);
   } else {
     rows.push(`<div>${badge("MTA-STS no disponible", "info")}</div>`);
   }
-  // TLS-RPT
   if (tlsrpt) rows.push(`<div><strong>TLS-RPT:</strong> <code>${safeText(tlsrpt)}</code></div>`);
   else rows.push(`<div>${badge("TLS-RPT no encontrado", "info")}</div>`);
-  // security.txt
   if (secTxt) rows.push(`<div><strong>security.txt:</strong> en ${safeText(secTxt.host)} <details><summary>Ver</summary><code>${safeText(secTxt.text)}</code></details></div>`);
   else rows.push(`<div>${badge("security.txt no encontrado", "info")} <a target="_blank" rel="noreferrer" href="https://${safeText(domain)}/.well-known/security.txt">probar</a></div>`);
-
   extraEl.innerHTML = rows.join("\n");
 }
 
-function summarize(domain, dnsData, rdapOk) {
+function summarize(domain, dnsData, rdapOk, obs) {
   const items = [];
   if (dnsData.DNSSEC) items.push("✅ DNSSEC detectado"); else items.push("⚠️ DNSSEC no detectado");
   if (dnsData.CAA?.length) items.push("✅ CAA presente"); else items.push("⚠️ CAA ausente (recomendado)");
@@ -323,6 +326,7 @@ function summarize(domain, dnsData, rdapOk) {
     items.push(`✅ DMARC presente (p=${pol})${pol.toLowerCase()==="none"?" ⚠️ considerar quarantine/reject":""}`);
   } else items.push("⚠️ DMARC ausente");
   if (!rdapOk) items.push("ℹ️ RDAP no disponible por CORS (link manual).");
+  if (obs?.grade) items.push(`🧪 Observatory: ${obs.grade} (${obs.score})`);
   summaryEl.innerHTML = list(items);
 }
 
@@ -335,43 +339,57 @@ async function runScan() {
   }
 
   btn.disabled = true; dnsBtn.disabled = true; fastModeEl.disabled = true;
-  logEl.textContent = ""; dnsEl.innerHTML = ""; rdapEl.innerHTML = ""; extraEl.innerHTML = ""; summaryEl.innerHTML = "";
+  logEl.textContent = ""; dnsEl.innerHTML = ""; rdapEl.innerHTML = ""; extraEl.innerHTML = ""; summaryEl.innerHTML = ""; obsEl.innerHTML = "";
   log("INFO", `Iniciando auditoría para ${domain} (DNS ${dnsMode}, timeout ${DEFAULT_TIMEOUT}ms, modo ${fastModeEl.checked?"rápido":"completo"})`);
 
   try {
-    // 1) DNS en paralelo (rápido)
+    // 1) DNS en paralelo
     const dnsData = await checkDNS(domain);
     renderDNS(domain, dnsData);
 
-    // 2) RDAP en paralelo al resto
+    // 2) RDAP en paralelo
     let rdapJson = null;
     const rdapTask = rdapDomain(domain).then(j=>{rdapJson=j; log("OK","RDAP obtenido");}).catch(e=>log("INFO",`RDAP no disponible — ${e.message}`));
 
-    // 3) Extras (condicionados por Modo rápido)
-    const extras = [];
-    extras.push(hstsPreload(domain).catch(e=>{log("INFO",`HSTS preload ND — ${e.message}`); return null;}));
-    extras.push(mozillaObservatory(domain).catch(e=>{log("INFO",`Observatory ND — ${e.message}`); return null;}));
-    extras.push(checkMtaSts(domain).catch(_=>null));
-    extras.push(checkTlsRpt(domain).catch(_=>null));
-    extras.push(checkSecurityTxt(domain).catch(_=>null));
+    // 3) Observatory v2 (no bloqueante en modo rápido)
+    const obsTask = observatoryV2(domain).then(j=>{ log("OK", `Observatory: ${j.grade} (${j.score})`); return j; })
+      .catch(e=>{ log("INFO", `Observatory v2 ND — ${e.message}`); return null; });
 
-    // En modo rápido, espera menos y no bloquea el render final
-    let extraResults;
+    // 4) Extras (HSTS/MTA-STS/TLS-RPT/security.txt)
+    const extraTasks = [
+      hstsPreload(domain).catch(e=>{log("INFO",`HSTS preload ND — ${e.message}`); return null;}),
+      checkMtaSts(domain).catch(_=>null),
+      checkTlsRpt(domain).catch(_=>null),
+      checkSecurityTxt(domain).catch(_=>null)
+    ];
+
+    let obsResult = null;
+    let extraResults = null;
+
     if (fastModeEl.checked) {
+      // esperar poco; render parcial si se demora
+      [obsResult] = await Promise.race([
+        Promise.all([obsTask]),
+        new Promise(res => setTimeout(()=>res([null]), 2500))
+      ]);
+      renderObservatory(domain, obsResult);
       extraResults = await Promise.race([
-        Promise.all(extras),
-        new Promise(res => setTimeout(()=>res([null,null,null,null,null]), 3500))
+        Promise.all(extraTasks),
+        new Promise(res => setTimeout(()=>res([null,null,null,null]), 3000))
       ]);
     } else {
-      extraResults = await Promise.all(extras);
+      obsResult = await obsTask;
+      renderObservatory(domain, obsResult);
+      extraResults = await Promise.all(extraTasks);
     }
 
-    const [hsts, observ, mta, tlsrpt, sectxt] = extraResults;
+    const [hsts, mta, tlsrpt, sectxt] = extraResults;
+    await rdapTask;
     renderRDAP(domain, rdapJson); // puede ser null (CORS)
-    renderExtra(domain, dnsData, hsts, observ, mta, tlsrpt, sectxt);
-    summarize(domain, dnsData, !!rdapJson);
+    renderExtra(domain, dnsData, hsts, mta, tlsrpt, sectxt);
+    summarize(domain, dnsData, !!rdapJson, obsResult);
 
-    log("INFO", "Listo. Solo fuentes públicas (DoH, RDAP, HSTS, Observatory, MTA-STS/TLS-RPT, security.txt).");
+    log("INFO", "Listo. Fuentes: DoH, RDAP, HSTS, Observatory v2, MTA-STS/TLS-RPT, security.txt.");
   } catch (e) {
     log("ERROR", e.message || String(e));
   } finally {

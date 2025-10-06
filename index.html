@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <meta name="theme-color" content="#11162b" />
-  <title>Auditoría Pública de Dominio (DNS + RDAP)</title>
+  <title>Auditoría Pública de Dominio (DNS + RDAP + Observatory)</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <h1>🔍 Auditoría Pública de Dominio</h1>
-    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.6 (mobile optimizado)</p>
+    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.7 (Observatory v2)</p>
   </header>
 
   <main>
@@ -47,6 +47,11 @@
       </div>
 
       <div class="card">
+        <h2>HTTP Observatory (MDN)</h2>
+        <div id="obsResults" class="results"></div>
+      </div>
+
+      <div class="card">
         <h2>Checks extra</h2>
         <div id="extraResults" class="results"></div>
       </div>
@@ -59,7 +64,7 @@
   </main>
 
   <footer>
-    <p>Fuentes: dns.google, cloudflare-dns.com, rdap.org, hstspreload.org, http-observatory.security.mozilla.org</p>
+    <p>Fuentes: dns.google, cloudflare-dns.com, rdap.org, hstspreload.org, observatory-api.mdn.mozilla.net</p>
   </footer>
 
   <script src="app.js"></script>

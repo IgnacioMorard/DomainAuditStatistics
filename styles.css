@@ -20,10 +20,7 @@ body {
   background: radial-gradient(1200px 800px at 20% 0%, #121938 0%, var(--bg) 55%);
 }
 
-header {
-  padding: 24px 16px 6px;
-  text-align: center;
-}
+header { padding: 24px 16px 6px; text-align: center; }
 h1 { margin: 0 0 6px; font-size: clamp(22px, 4vw, 28px); }
 .subtitle { color: var(--muted); margin-top: 4px; font-size: 14px; }
 
@@ -55,9 +52,7 @@ button {
   padding: 12px 14px; background: var(--accent); color: white; border: none;
   border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 16px;
 }
-button.ghost {
-  background: transparent; color: var(--text); border: 1px solid var(--border);
-}
+button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
 button:active { transform: scale(0.98); }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 

@@ -1,23 +1,18 @@
-# Auditoría Pública de Dominio — v2.6 (mobile optimizada)
+# Auditoría Pública de Dominio — v2.7
 
-**Qué trae esta versión**
-- **Logs fluidos en mobile y web**: buffer + `requestAnimationFrame`, auto-scroll con fix iOS.
-- **Fetch API “bien usada”**: timeouts con `AbortController`, `mode:"cors"`, `cache:"no-store"`.
-- **DNS más rápido**: consultas DoH **en paralelo** y estrategia **race** (Google ↔ Cloudflare).
-- **Modo rápido** (móvil): limita espera para “extras” (HSTS/Observatory/MTA-STS/TLS-RPT/security.txt) para entregar resultados visibles antes.
-- **Extras públicos**: HSTS Preload, Mozilla Observatory (best-effort), MTA-STS, TLS-RPT, `security.txt`.
+**Novedad clave:** integración con **MDN HTTP Observatory API v2** (v1 está deprecado/cerrado).
 
-## Deploy en GitHub Pages
-1. Subí `index.html`, `app.js`, `styles.css` a tu repo.
-2. Settings → Pages → Deploy from a branch (main, root).
-3. Abrí `https://<usuario>.github.io/<repo>/`
+- Endpoint usado: `POST https://observatory-api.mdn.mozilla.net/api/v2/scan?host=<dominio>`
+- Respuesta: JSON con `grade`, `score`, `tests_passed`, `tests_failed`, `tests_quantity`, `algorithm_version`, `scanned_at`, `details_url` (para abrir el reporte completo).  
+- Rate-limit: 1 escaneo por host por minuto (si se excede, devuelve **cache**) — ver README oficial.
 
-## Dev local
-```bash
-python -m http.server 8080
-# http://localhost:8080
-```
+### Referencias
+- API v2 y formato de respuesta (README del backend MDN): contiene ejemplo de JSON y nota de migración desde v1.  
+- Puntuación y rangos de calificación (A+, A, ...): ver **Tests & Scoring**.
+
+## Deploy
+Subí `index.html`, `app.js`, `styles.css` a GitHub Pages.
 
 ## Notas
-- Algunas APIs pueden no permitir CORS en tu navegador. La app no se rompe y muestra enlaces directos.
-- En redes móviles lentas, activá **Modo rápido** para sentir la mejora.
+- Si `Observatory v2` da 500 temporales, reintentar más tarde; hay issues reportados.
+- En navegadores móviles, activá **Modo rápido** para mejores tiempos percibidos.
