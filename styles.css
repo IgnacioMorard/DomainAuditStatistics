@@ -44,7 +44,8 @@ main { padding: 12px; max-width: 1100px; margin: 0 auto; }
   grid-gap: 12px;
 }
 
-.row { display: flex; gap: 8px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row.wrap { flex-wrap: wrap; }
 
 input {
   flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border);
@@ -54,7 +55,14 @@ button {
   padding: 12px 14px; background: var(--accent); color: white; border: none;
   border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 16px;
 }
+button.ghost {
+  background: transparent; color: var(--text); border: 1px solid var(--border);
+}
+button:active { transform: scale(0.98); }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.switch { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.switch input { width: 18px; height: 18px; }
 
 .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
 

@@ -10,7 +10,7 @@
 <body>
   <header>
     <h1>🔍 Auditoría Pública de Dominio</h1>
-    <p class="subtitle">DNS, RDAP y parámetros públicos — versión 2.5</p>
+    <p class="subtitle">DNS, RDAP y parámetros públicos — v2.6 (mobile optimizado)</p>
   </header>
 
   <main>
@@ -18,9 +18,16 @@
       <label for="domain">Dominio</label>
       <div class="row">
         <input id="domain" type="text" placeholder="ej: example.com" inputmode="url" autocomplete="off" />
-        <button id="scanBtn">Escanear</button>
       </div>
-      <p class="hint">Solo se consultan fuentes públicas (DNS sobre HTTPS, RDAP y APIs públicas). No se hacen acciones intrusivas.</p>
+      <div class="row wrap">
+        <button id="scanBtn">Escanear</button>
+        <button id="dnsBtn" class="ghost">DNS: Auto (race)</button>
+        <label class="switch">
+          <input type="checkbox" id="fastMode" />
+          <span>Modo rápido</span>
+        </label>
+      </div>
+      <p class="hint">Solo fuentes públicas (DoH, RDAP y APIs públicas). No intrusivo. En móvil, activá “Modo rápido”.</p>
     </section>
 
     <section class="grid">
@@ -52,7 +59,7 @@
   </main>
 
   <footer>
-    <p>Solo parámetros públicos | Fuentes: dns.google, cloudflare-dns.com, rdap.org, hstspreload.org, http-observatory.security.mozilla.org</p>
+    <p>Fuentes: dns.google, cloudflare-dns.com, rdap.org, hstspreload.org, http-observatory.security.mozilla.org</p>
   </footer>
 
   <script src="app.js"></script>
