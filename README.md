@@ -1,9 +1,9 @@
-# v3.1 — Sin proxy, con MXToolbox y security.txt visible
+# v3.2 — Observatory detallado + resumen simple de DNS
 
-- **DNS**: se muestran **enlaces directos a MXToolbox** (A, AAAA, NS, MX, SOA, CAA, TXT, DMARC, SPF, DNSSEC).  
-  Si activás el toggle **“Consultar DoH directo”**, intenta DoH (Google/Cloudflare/Quad9/DNS.SB) y muestra lo que consiga. Si tu red bloquea DoH, usá los enlaces.
-- **security.txt**: primero intenta `fetch`. Si CORS bloquea, **embebe** el archivo con `<object>` (se ve el contenido aunque no podamos leerlo). Si el servidor bloquea framing, queda el enlace.
-- **Quitado**: HSTS e Infra, como pediste.
-- Mantiene: **RDAP** y **MDN Observatory v2**, y el panel **Email Transport Security** (MTA-STS / TLS-RPT).
+- **Observatory**: barra de puntuación (0–145), banda/grade dinámica, % de tests pasados, `algorithm_version`, `scanned_at`, y links a **Reporte completo** + **Cómo se calcula**.
+- **Resumen**: menos cargado de DNS (solo indicadores clave: DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / security.txt / RDAP).
+- **DNS**: igual que v3.1 (DoH opcional).  
+- **MXToolbox**: sin scraping (CORS/X-Frame-Options). Queda un panel con accesos rápidos. Si querés integrar su API oficial, hay que usar un backend para resguardar la API key.
 
-Subí `index.html`, `styles.css`, `app.js` a GitHub Pages.
+## Subir a GitHub Pages
+Publicá `index.html`, `styles.css`, `app.js`.

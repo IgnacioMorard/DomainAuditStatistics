@@ -8,7 +8,7 @@ const summaryEl = $("#summary");
 const obsEl = $("#obsResults");
 const emailEl = $("#emailSecResults");
 const secTxtEl = $("#secTxtResults");
-const mxtLinksEl = $("#mxtLinks");
+const mxtPanelEl = $("#mxtPanel");
 const btn = $("#scanBtn");
 const dnsBtn = $("#dnsBtn");
 const input = $("#domain");
@@ -17,7 +17,7 @@ const directDnsEl = $("#directDNS");
 
 let dnsMode = "auto"; // auto (race), google, cloudflare, quad9, dnssb
 
-// Heurística de móvil: ajustar timeouts si red es lenta
+// Heurística de móvil
 let DEFAULT_TIMEOUT = 9000;
 if (navigator.connection) {
   const et = navigator.connection.effectiveType || "";
@@ -125,7 +125,6 @@ async function fetchText(url) {
   return r.text();
 }
 async function checkMtaSts(domain) {
-  // TXT via DoH si el usuario lo habilita
   let txt = null, policy = null, policyUrl = null;
   if (directDnsEl.checked) {
     try {
@@ -149,14 +148,12 @@ async function checkTlsRpt(domain) {
   } catch(e) { return null; }
 }
 async function checkSecurityTxt(domain) {
-  // 1) try fetch (CORS)
   for (const host of [domain, `www.${domain}`]) {
     const url = `https://${host}/.well-known/security.txt`;
     try {
       const t = await fetchText(url);
       return { host, text: t, url, rendered: null };
     } catch(e) {
-      // 2) fallback: <object> embebido (no necesitamos CORS para mostrar)
       const rendered = `<object data="${url}" type="text/plain" style="width:100%;min-height:160px;border:1px solid var(--border);border-radius:8px;"></object>`;
       return { host, text: null, url, rendered };
     }
@@ -172,7 +169,7 @@ async function queryType(domain, type) {
 async function checkDNS(domain) {
   const res = {};
   if (!directDnsEl.checked) {
-    log("INFO", "Consulta DoH deshabilitada; usá los enlaces de MXToolbox para ver registros.");
+    log("INFO", "Consulta DoH deshabilitada; usá MXToolbox para visualizar registros.");
     return res;
   }
   const types = ["A","AAAA","NS","MX","SOA","CAA","TXT","DS"];
@@ -201,7 +198,7 @@ function list(items) { return `<ul>${items.map(i => `<li>${i}</li>`).join("")}</
 function renderDNS(domain, data) {
   const joinData = (arr) => arr?.map(x => safeText(x.data)).join("<br>") || "—";
   if (Object.keys(data).length===0) {
-    dnsEl.innerHTML = `<p>${badge("DoH deshabilitado", "info")} Activá “Consultar DoH directo” o usá los enlaces de MXToolbox de abajo.</p>`;
+    dnsEl.innerHTML = `<p>${badge("DoH deshabilitado", "info")} Activá “Consultar DoH directo” o usá MXToolbox.</p>`;
   } else {
     dnsEl.innerHTML = `
       <h3>${safeText(domain)}</h3>
@@ -224,22 +221,25 @@ function renderDNS(domain, data) {
     `;
   }
 
-  // Enlaces MXToolbox
+  // Panel MXToolbox
   const enc = encodeURIComponent(domain);
-  const links = [
+  const quick = [
+    ["SuperTool", `https://mxtoolbox.com/SuperTool.aspx?action=supertool%3a${enc}&run=networktools`],
     ["A", `https://mxtoolbox.com/SuperTool.aspx?action=a%3a${enc}&run=toolpage`],
-    ["AAAA", `https://mxtoolbox.com/SuperTool.aspx?action=aaaa%3a${enc}&run=toolpage`],
-    ["NS", `https://mxtoolbox.com/SuperTool.aspx?action=ns%3a${enc}&run=toolpage`],
     ["MX", `https://mxtoolbox.com/SuperTool.aspx?action=mx%3a${enc}&run=toolpage`],
-    ["SOA", `https://mxtoolbox.com/SuperTool.aspx?action=soa%3a${enc}&run=toolpage`],
-    ["CAA", `https://mxtoolbox.com/SuperTool.aspx?action=caa%3a${enc}&run=toolpage`],
-    ["TXT", `https://mxtoolbox.com/SuperTool.aspx?action=txt%3a${enc}&run=toolpage`],
-    ["DMARC", `https://mxtoolbox.com/SuperTool.aspx?action=dmarc%3a${enc}&run=toolpage`],
+    ["NS", `https://mxtoolbox.com/SuperTool.aspx?action=ns%3a${enc}&run=toolpage`],
     ["SPF", `https://mxtoolbox.com/SuperTool.aspx?action=spf%3a${enc}&run=toolpage`],
+    ["DMARC", `https://mxtoolbox.com/SuperTool.aspx?action=dmarc%3a${enc}&run=toolpage`],
     ["DNSSEC", `https://mxtoolbox.com/SuperTool.aspx?action=dnssec%3a${enc}&run=toolpage`],
   ];
-  mxtLinksEl.innerHTML = `<h4>Abrir en MXToolbox</h4>
-    <ul>${links.map(([k,u])=>`<li><a target="_blank" rel="noreferrer" href="${u}">${k}</a></li>`).join("")}</ul>`;
+  mxtPanelEl.innerHTML = `
+    <h4>MXToolbox</h4>
+    <p>${badge("Limitación del navegador", "info")} No es posible leer datos de MXToolbox desde una SPA estática por CORS y X-Frame-Options. Abrí los tests en nueva pestaña:</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px;">
+      ${quick.map(([k,u])=>`<a class="btnlink" target="_blank" rel="noreferrer" href="${u}">${k}</a>`).join("")}
+    </div>
+    <style>.btnlink{display:inline-block;padding:8px 10px;border:1px solid var(--border);border-radius:10px;color:var(--text);text-decoration:none}</style>
+  `;
 }
 
 function renderRDAP(domain, rdap) {
@@ -269,26 +269,56 @@ function renderRDAP(domain, rdap) {
   rdapEl.innerHTML = rows.join("\n") + `<details style="margin-top:8px;"><summary>Ver JSON RDAP</summary><code>${safeText(JSON.stringify(rdap, null, 2))}</code></details>`;
 }
 
+// ===== Observatory detallado =====
 function renderObservatory(domain, obs) {
   if (!obs) {
     obsEl.innerHTML = `<p>${badge("Observatory no disponible (CORS/limits)", "info")} <a target="_blank" rel="noreferrer" href="https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}">Ver reporte</a></p>`;
     return;
   }
-  const rows = [];
   const grade = safeText(obs.grade || "?");
-  const score = typeof obs.score === "number" ? obs.score : "?";
+  const score = typeof obs.score === "number" ? obs.score : 0;
+  const maxScore = 145; // según MDN Tests & Scoring
+  const pct = Math.max(0, Math.min(100, Math.round((score / maxScore) * 100)));
   const tf = obs.tests_failed ?? "?";
   const tp = obs.tests_passed ?? "?";
   const tq = obs.tests_quantity ?? "?";
   const algo = obs.algorithm_version ?? "?";
   const scannedAt = obs.scanned_at ? new Date(obs.scanned_at).toLocaleString() : "—";
   const details = obs.details_url || `https://developer.mozilla.org/en-US/observatory/analyze?host=${encodeURIComponent(domain)}`;
+
+  function gradeBand(s) {
+    if (s >= 100) return "A+";
+    if (s >= 90) return "A";
+    if (s >= 85) return "A-";
+    if (s >= 80) return "B+";
+    if (s >= 70) return "B";
+    if (s >= 65) return "B-";
+    if (s >= 60) return "C+";
+    if (s >= 50) return "C";
+    if (s >= 45) return "C-";
+    if (s >= 40) return "D+";
+    if (s >= 30) return "D";
+    if (s >= 25) return "D-";
+    return "F";
+  }
+  const band = gradeBand(score);
   const type = score >= 90 ? "ok" : (score >= 60 ? "warn" : "err");
-  rows.push(`<div><strong>Grade:</strong> ${badge(grade, type)} &nbsp; <strong>Score:</strong> ${badge(String(score), type)}</div>`);
-  rows.push(`<div><strong>Tests:</strong> ${tp}/${tq} pasados, ${tf} fallidos</div>`);
-  rows.push(`<div><strong>Algoritmo:</strong> v${safeText(String(algo))} &nbsp; <strong>Escaneado:</strong> ${safeText(scannedAt)}</div>`);
-  rows.push(`<div><a target="_blank" rel="noreferrer" href="${safeText(details)}">Reporte completo MDN</a></div>`);
-  obsEl.innerHTML = rows.join("\n");
+  const passRate = (typeof tp==="number" && typeof tq==="number" && tq>0) ? Math.round((tp/tq)*100) : null;
+
+  obsEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div><strong>Grade:</strong> ${badge(grade, type)}</div>
+      <div><strong>Score:</strong> ${badge(String(score), type)} / ${maxScore} (${pct}%)</div>
+      <div><strong>Banda:</strong> <code>${band}</code></div>
+    </div>
+    <div class="meter" style="margin:8px 0 10px;"><i style="width:${pct}%"></i></div>
+    <div><strong>Tests:</strong> ${tp}/${tq} pasados${passRate!==null?` (${passRate}%)`:""}, ${tf} fallidos</div>
+    <div><strong>Algoritmo:</strong> v${safeText(String(algo))} · <strong>Escaneado:</strong> ${safeText(scannedAt)}</div>
+    <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">
+      <a target="_blank" rel="noreferrer" href="${safeText(details)}">Reporte completo (MDN)</a>
+      <a target="_blank" rel="noreferrer" href="https://developer.mozilla.org/en-US/observatory/docs/tests_and_scoring">Cómo se calcula el puntaje</a>
+    </div>
+  `;
 }
 
 function renderEmailSec(domain, mta, tlsrpt) {
@@ -334,16 +364,16 @@ function renderSecurityTxt(domain, sec) {
 }
 
 function summarize(domain, dnsData, rdapOk, obs, mta, tlsrpt, sec) {
+  // Resumen menos cargado de DNS
   const items = [];
-  if (dnsData.DNSSEC) items.push("✅ DNSSEC detectado"); else items.push("⚠️ DNSSEC no detectado");
-  if (dnsData.CAA?.length) items.push("✅ CAA presente"); else items.push("⚠️ CAA ausente (recomendado)");
-  if (dnsData.SPF) items.push("✅ SPF presente"); else items.push("⚠️ SPF ausente");
-  if (dnsData.DMARC) items.push("✅ DMARC presente"); else items.push("⚠️ DMARC ausente");
-  if (!rdapOk) items.push("ℹ️ RDAP no disponible (CORS).");
+  if (obs?.grade) items.push(`🧪 Observatory: ${obs.grade} (${obs.score})`);
+  if (dnsData.DNSSEC !== undefined) items.push(dnsData.DNSSEC ? "✅ DNSSEC detectado" : "⚠️ DNSSEC no detectado");
+  if (dnsData.SPF !== undefined) items.push(dnsData.SPF ? "✅ SPF presente" : "⚠️ SPF ausente");
+  if (dnsData.DMARC !== undefined) items.push(dnsData.DMARC ? "✅ DMARC presente" : "⚠️ DMARC ausente");
   if (mta?.policy || mta?.dns) items.push("✉️ MTA-STS presente");
   if (tlsrpt) items.push("📊 TLS-RPT presente");
+  if (!rdapOk) items.push("ℹ️ RDAP no disponible (CORS).");
   if (sec) items.push("🛡️ security.txt accesible");
-  if (obs?.grade) items.push(`🧪 Observatory: ${obs.grade} (${obs.score})`);
   summaryEl.innerHTML = list(items);
 }
 
@@ -357,7 +387,7 @@ async function runScan() {
 
   btn.disabled = true; dnsBtn.disabled = true; fastModeEl.disabled = false;
   logEl.textContent = ""; dnsEl.innerHTML = ""; rdapEl.innerHTML = ""; summaryEl.innerHTML = "";
-  obsEl.innerHTML = ""; emailEl.innerHTML = ""; secTxtEl.innerHTML = ""; mxtLinksEl.innerHTML = "";
+  obsEl.innerHTML = ""; emailEl.innerHTML = ""; secTxtEl.innerHTML = ""; mxtPanelEl.innerHTML = "";
   log("INFO", `Auditoría para ${domain} — DoH ${directDnsEl.checked?"ON":"OFF"} (DNS ${dnsMode})`);
 
   try {
